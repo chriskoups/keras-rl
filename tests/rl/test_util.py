@@ -4,11 +4,11 @@ import numpy as np
 from numpy.testing import assert_allclose
 
 from keras.models import Model, Sequential
-from keras.layers import Input, Dense, merge
+from keras.layers import Input, Dense, Concatenate
 from keras.optimizers import SGD
 import keras.backend as K
 
-from rl.util import clone_optimizer, clone_model
+from rl.util import clone_optimizer, clone_model, huber_loss, WhiteningNormalizer
 
 
 def test_clone_sequential_model():
@@ -29,7 +29,7 @@ def test_clone_sequential_model():
 def test_clone_graph_model():
     in1 = Input(shape=(2,))
     in2 = Input(shape=(3,))
-    x = Dense(8)(merge([in1, in2], mode='concat'))
+    x = Dense(8)(Concatenate()([in1, in2]))
     graph = Model([in1, in2], x)
     graph.compile(optimizer='sgd', loss='mse')
 
@@ -58,6 +58,31 @@ def test_clone_optimizer():
 def test_clone_optimizer_from_string():
     clone = clone_optimizer('sgd')
     assert isinstance(clone, SGD)
+
+
+def test_huber_loss():
+    a = np.array([1.,  1.5, 2., 4.])
+    b = np.array([1.5, 1.,  4., 2.])
+    assert_allclose(K.eval(huber_loss(a, b, 1.)), np.array([.125, .125, 1.5, 1.5]))
+    assert_allclose(K.eval(huber_loss(a, b, 3.)), np.array([.125, .125, 2., 2.]))
+    assert_allclose(K.eval(huber_loss(a, b, np.inf)), np.array([.125, .125, 2., 2.]))
+
+
+def test_whitening_normalizer():
+    x = np.random.normal(loc=.2, scale=2., size=(1000, 5))
+    normalizer = WhiteningNormalizer(shape=(5,))
+    normalizer.update(x[:500])
+    normalizer.update(x[500:])
+
+    assert_allclose(normalizer.mean, np.mean(x, axis=0))
+    assert_allclose(normalizer.std, np.std(x, axis=0))
+    
+    x_norm = normalizer.normalize(x)
+    assert_allclose(np.mean(x_norm, axis=0), np.zeros(5, dtype=normalizer.dtype), atol=1e-5)
+    assert_allclose(np.std(x_norm, axis=0), np.ones(5, dtype=normalizer.dtype), atol=1e-5)
+
+    x_denorm = normalizer.denormalize(x_norm)
+    assert_allclose(x_denorm, x)
 
 
 if __name__ == '__main__':

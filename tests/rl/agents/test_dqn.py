@@ -5,12 +5,12 @@ import pytest
 import numpy as np
 from numpy.testing import assert_allclose
 
-from keras.models import Model, Sequential
-from keras.layers import Input, merge, Dense, Flatten
+from keras.models import Sequential, Model
+from keras.layers import Input, Dense, Flatten, Concatenate
 
-from rl.agents.dqn import NAFLayer, DQNAgent, ContinuousDQNAgent
+from rl.agents.dqn import NAFLayer, DQNAgent, NAFAgent
 from rl.memory import SequentialMemory
-from rl.core import MultiInputProcessor
+from rl.processors import MultiInputProcessor
 
 from ..util import MultiInputTestEnv
 
@@ -31,10 +31,10 @@ def test_single_dqn_input():
 def test_multi_dqn_input():
     input1 = Input(shape=(2, 3))
     input2 = Input(shape=(2, 4))
-    x = merge([input1, input2], mode='concat')
+    x = Concatenate()([input1, input2])
     x = Flatten()(x)
     x = Dense(2)(x)
-    model = Model(input=[input1, input2], output=x)
+    model = Model(inputs=[input1, input2], outputs=x)
 
     memory = SequentialMemory(limit=10, window_length=2)
     processor = MultiInputProcessor(nb_inputs=2)
@@ -58,13 +58,13 @@ def test_single_continuous_dqn_input():
 
     L_input = Input(shape=(2, 3))
     L_input_action = Input(shape=(nb_actions,))
-    x = merge([Flatten()(L_input), L_input_action], mode='concat')
+    x = Concatenate()([Flatten()(L_input), L_input_action])
     x = Dense(((nb_actions * nb_actions + nb_actions) // 2))(x)
-    L_model = Model(input=[L_input_action, L_input], output=x)
+    L_model = Model(inputs=[L_input_action, L_input], outputs=x)
 
     memory = SequentialMemory(limit=10, window_length=2)
-    agent = ContinuousDQNAgent(nb_actions=nb_actions, V_model=V_model, L_model=L_model, mu_model=mu_model,
-                               memory=memory, nb_steps_warmup=5, batch_size=4)
+    agent = NAFAgent(nb_actions=nb_actions, V_model=V_model, L_model=L_model, mu_model=mu_model,
+                     memory=memory, nb_steps_warmup=5, batch_size=4)
     agent.compile('sgd')
     agent.fit(MultiInputTestEnv((3,)), nb_steps=10)
 
@@ -74,30 +74,30 @@ def test_multi_continuous_dqn_input():
 
     V_input1 = Input(shape=(2, 3))
     V_input2 = Input(shape=(2, 4))
-    x = merge([V_input1, V_input2], mode='concat')
+    x = Concatenate()([V_input1, V_input2])
     x = Flatten()(x)
     x = Dense(1)(x)
-    V_model = Model(input=[V_input1, V_input2], output=x)
+    V_model = Model(inputs=[V_input1, V_input2], outputs=x)
 
     mu_input1 = Input(shape=(2, 3))
     mu_input2 = Input(shape=(2, 4))
-    x = merge([mu_input1, mu_input2], mode='concat')
+    x = Concatenate()([mu_input1, mu_input2])
     x = Flatten()(x)
     x = Dense(nb_actions)(x)
-    mu_model = Model(input=[mu_input1, mu_input2], output=x)
+    mu_model = Model(inputs=[mu_input1, mu_input2], outputs=x)
 
     L_input1 = Input(shape=(2, 3))
     L_input2 = Input(shape=(2, 4))
     L_input_action = Input(shape=(nb_actions,))
-    x = merge([L_input1, L_input2], mode='concat')
-    x = merge([Flatten()(x), L_input_action], mode='concat')
+    x = Concatenate()([L_input1, L_input2])
+    x = Concatenate()([Flatten()(x), L_input_action])
     x = Dense(((nb_actions * nb_actions + nb_actions) // 2))(x)
-    L_model = Model(input=[L_input_action, L_input1, L_input2], output=x)
+    L_model = Model(inputs=[L_input_action, L_input1, L_input2], outputs=x)
 
     memory = SequentialMemory(limit=10, window_length=2)
     processor = MultiInputProcessor(nb_inputs=2)
-    agent = ContinuousDQNAgent(nb_actions=nb_actions, V_model=V_model, L_model=L_model, mu_model=mu_model,
-                               memory=memory, nb_steps_warmup=5, batch_size=4, processor=processor)
+    agent = NAFAgent(nb_actions=nb_actions, V_model=V_model, L_model=L_model, mu_model=mu_model,
+                     memory=memory, nb_steps_warmup=5, batch_size=4, processor=processor)
     agent.compile('sgd')
     agent.fit(MultiInputTestEnv([(3,), (4,)]), nb_steps=10)
 
@@ -110,9 +110,8 @@ def test_naf_layer_full():
         L_flat_input = Input(shape=((nb_actions * nb_actions + nb_actions) // 2,))
         mu_input = Input(shape=(nb_actions,))
         action_input = Input(shape=(nb_actions,))
-        x = merge([L_flat_input, mu_input, action_input], mode='concat')
-        x = NAFLayer(nb_actions, mode='full')(x)
-        model = Model(input=[L_flat_input, mu_input, action_input], output=x)
+        x = NAFLayer(nb_actions, mode='full')([L_flat_input, mu_input, action_input])
+        model = Model(inputs=[L_flat_input, mu_input, action_input], outputs=x)
         model.compile(loss='mse', optimizer='sgd')
         
         # Create random test data.
@@ -145,9 +144,8 @@ def test_naf_layer_diag():
         L_flat_input = Input(shape=(nb_actions,))
         mu_input = Input(shape=(nb_actions,))
         action_input = Input(shape=(nb_actions,))
-        x = merge([L_flat_input, mu_input, action_input], mode='concat')
-        x = NAFLayer(nb_actions, mode='diag')(x)
-        model = Model(input=[L_flat_input, mu_input, action_input], output=x)
+        x = NAFLayer(nb_actions, mode='diag')([L_flat_input, mu_input, action_input])
+        model = Model(inputs=[L_flat_input, mu_input, action_input], outputs=x)
         model.compile(loss='mse', optimizer='sgd')
         
         # Create random test data.
