@@ -35,7 +35,19 @@ def sample_batch_indexes(low, high, size):
 
 
 class RingBuffer(object):
+    """ RingBuffer.
+    
+    First-In-First-Out (FIFO) data storage structure. Input data is appended
+    sequentially to a buffer array, once the buffer is filled, new input data
+    overwrites the oldest data first.
+    
+    # Arguments
+        maxlen: int > 0 Size of the buffer
+    
+    """
     def __init__(self, maxlen):
+        if maxlen <= 0:
+            maxlen = 1
         self.maxlen = maxlen
         self.start = 0
         self.length = 0
@@ -64,49 +76,60 @@ class RingBuffer(object):
         self.data[(self.start + self.length - 1) % self.maxlen] = v
 
 
-def zeroed_observation(observation):
-    if hasattr(observation, 'shape'):
-        return np.zeros(observation.shape)
-    elif hasattr(observation, '__iter__'):
-        out = []
-        for x in observation:
-            out.append(zeroed_observation(x))
-        return out
+def shape_from_object(object):
+    if hasattr(object, 'shape'):
+        return object.shape
+    #elif hasattr(object, '__iter__'):
+    #    return (objectshape_from_object(object[0])
+    #    return out.shape()
     else:
-        return 0.
+        return ()
 
 
 class Memory(object):
+    """ Memory.
+    
+    First-In-First-Out (FIFO) data storage structure. Input data is appended
+    sequentially to a buffer array, once the buffer is filled, new input data
+    overwrites the oldest data first.
+    
+    # Arguments
+        window_length: int > 0 Size of the buffer
+        ignore_episode_boundaries: bool 
+    """
+    
     def __init__(self, window_length, ignore_episode_boundaries=False):
-        self.window_length = window_length
+        self.window_length = window_length 
         self.ignore_episode_boundaries = ignore_episode_boundaries
 
-        self.recent_observations = deque(maxlen=window_length)
-        self.recent_terminals = deque(maxlen=window_length)
+        self.recent_observations = None
+        self.recent_terminals = deque([False]*window_length,maxlen=window_length)
 
     def sample(self, batch_size, batch_idxs=None):
         raise NotImplementedError()
 
     def append(self, observation, action, reward, terminal, training=True):
+        if self.recent_observations == None:
+            self.recent_observations = deque(np.zeros((self.window_length,) + shape_from_object(observation)), maxlen=self.window_length)
+        
         self.recent_observations.append(observation)
         self.recent_terminals.append(terminal)
 
-    def get_recent_state(self, current_observation):
-        # This code is slightly complicated by the fact that subsequent observations might be
-        # from different episodes. We ensure that an experience never spans multiple episodes.
-        # This is probably not that important in practice but it seems cleaner.
-        state = [current_observation]
-        idx = len(self.recent_observations) - 1
-        for offset in range(0, self.window_length - 1):
-            current_idx = idx - offset
-            current_terminal = self.recent_terminals[current_idx - 1] if current_idx - 1 >= 0 else False
-            if current_idx < 0 or (not self.ignore_episode_boundaries and current_terminal):
-                # The previously handled observation was terminal, don't add the current one.
-                # Otherwise we would leak into a different episode.
+    def get_recent_states(self, current_observation):
+        if self.recent_observations == None:
+            self.recent_observations = deque(np.zeros((self.window_length,) + shape_from_object(current_observation)), maxlen=self.window_length)
+        
+        state = np.zeros((self.window_length,) + shape_from_object(current_observation))
+        state[-1] = current_observation
+        for idx in range(self.window_length-1, 0, -1):
+            if not self.ignore_episode_boundaries and self.recent_terminals[idx-1]:
+                #found terminal so leave the rest of the array as zeros
                 break
-            state.insert(0, self.recent_observations[current_idx])
-        while len(state) < self.window_length:
-            state.insert(0, zeroed_observation(state[0]))
+            
+            state[idx-1] = self.recent_observations[idx]
+
+        assert len(state) is self.window_length
+        
         return state
 
     def get_config(self):
@@ -122,13 +145,10 @@ class SequentialMemory(Memory):
         super(SequentialMemory, self).__init__(**kwargs)
         
         self.limit = limit
-
-        # Do not use deque to implement the memory. This data structure may seem convenient but
-        # it is way too slow on random access. Instead, we use our own ring buffer implementation.
-        self.actions = RingBuffer(limit)
-        self.rewards = RingBuffer(limit)
-        self.terminals = RingBuffer(limit)
-        self.observations = RingBuffer(limit)
+        self.actions = deque(maxlen=limit)
+        self.rewards = deque(maxlen=limit)
+        self.terminals = deque(maxlen=limit)
+        self.observations = deque(maxlen=limit)
 
     def sample(self, batch_size, batch_idxs=None):
         # It is not possible to tell whether the first state in the memory is terminal, because it
@@ -141,54 +161,43 @@ class SequentialMemory(Memory):
         if batch_idxs is None:
             # Draw random indexes such that we have enough entries before each index to fill the
             # desired window length.
-            batch_idxs = sample_batch_indexes(
-                self.window_length, self.nb_entries - 1, size=batch_size)
-        batch_idxs = np.array(batch_idxs) + 1
-        assert np.min(batch_idxs) >= self.window_length + 1
-        assert np.max(batch_idxs) < self.nb_entries
+            batch_idxs = sample_batch_indexes(self.window_length, self.nb_entries - 1, size=batch_size)
+            
+        # ensure that none of the batches starts with a terminal condition
+        # replace any that do
+        # this may result in the batches to start at the same index
+        i = 0
+        for idx in batch_idxs:
+            while(not self.ignore_episode_boundaries and self.terminals[idx-1]):
+                idx = sample_batch_indexes(self.window_length, self.nb_entries - 1, size=batch_size)[0]
+            batch_idxs[i] = idx
+            i = i + 1
+                
+        assert np.min(batch_idxs) >= self.window_length
+        assert np.max(batch_idxs) < self.nb_entries - 1
         assert len(batch_idxs) == batch_size
-
+        
         # Create experiences
         experiences = []
         for idx in batch_idxs:
-            terminal0 = self.terminals[idx - 2]
-            while terminal0:
-                # Skip this transition because the environment was reset here. Select a new, random
-                # transition and use this instead. This may cause the batch to contain the same
-                # transition twice.
-                idx = sample_batch_indexes(self.window_length + 1, self.nb_entries, size=1)[0]
-                terminal0 = self.terminals[idx - 2]
-            assert self.window_length + 1 <= idx < self.nb_entries
-
-            # This code is slightly complicated by the fact that subsequent observations might be
-            # from different episodes. We ensure that an experience never spans multiple episodes.
-            # This is probably not that important in practice but it seems cleaner.
-            state0 = [self.observations[idx - 1]]
-            for offset in range(0, self.window_length - 1):
-                current_idx = idx - 2 - offset
-                assert current_idx >= 1
-                current_terminal = self.terminals[current_idx - 1]
-                if current_terminal and not self.ignore_episode_boundaries:
-                    # The previously handled observation was terminal, don't add the current one.
-                    # Otherwise we would leak into a different episode.
+            state0 = np.zeros((self.window_length,) + shape_from_object(self.observations[0]))
+            state_idx = self.window_length - 1
+            for offset in range(idx, idx - self.window_length, -1):
+                if not self.ignore_episode_boundaries and self.terminals[offset-1]:
+                    #found terminal so leave the rest of the array as zeros
                     break
-                state0.insert(0, self.observations[current_idx])
-            while len(state0) < self.window_length:
-                state0.insert(0, zeroed_observation(state0[0]))
-            action = self.actions[idx - 1]
-            reward = self.rewards[idx - 1]
-            terminal1 = self.terminals[idx - 1]
-
-            # Okay, now we need to create the follow-up state. This is state0 shifted on timestep
-            # to the right. Again, we need to be careful to not include an observation from the next
-            # episode if the last state is terminal.
-            state1 = [np.copy(x) for x in state0[1:]]
-            state1.append(self.observations[idx])
-
+                state0[state_idx] = self.observations[offset]
+                
+                state_idx = state_idx - 1
+            
             assert len(state0) == self.window_length
-            assert len(state1) == len(state0)
-            experiences.append(Experience(state0=state0, action=action, reward=reward,
-                                          state1=state1, terminal1=terminal1))
+            
+            state1 = [np.copy(x) for x in state0[1:]]
+            state1.append(self.observations[idx+1])
+            assert len(state1) == self.window_length
+            
+            experiences.append(Experience(state0=state0, action=self.actions[idx], reward=self.rewards[idx],
+                                          state1=state1, terminal1=self.terminals[idx]))
         assert len(experiences) == batch_size
         return experiences
 

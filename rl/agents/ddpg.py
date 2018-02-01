@@ -208,7 +208,7 @@ class DDPGAgent(Agent):
 
     def forward(self, observation):
         # Select an action.
-        state = self.memory.get_recent_state(observation)
+        state = self.memory.get_recent_states(observation)
         action = self.select_action(state)  # TODO: move this into policy
         if self.processor is not None:
             action = self.processor.process_action(action)

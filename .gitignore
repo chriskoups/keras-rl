@@ -72,3 +72,7 @@ docs/_build/
 
 # PyBuilder
 target/
+
+# IDE
+.project
+.pydevproject

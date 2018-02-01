@@ -83,6 +83,7 @@ class EpsGreedyQPolicy(Policy):
             action = np.random.random_integers(0, nb_actions-1)
         else:
             action = np.argmax(q_values)
+        
         return action
 
     def get_config(self):

@@ -258,13 +258,13 @@ class DQNAgent(AbstractDQNAgent):
 
     def forward(self, observation):
         # Select an action.
-        state = self.memory.get_recent_state(observation)
+        state = self.memory.get_recent_states(observation)
         q_values = self.compute_q_values(state)
         if self.training:
             action = self.policy.select_action(q_values=q_values)
         else:
             action = self.test_policy.select_action(q_values=q_values)
-
+            
         # Book-keeping.
         self.recent_observation = observation
         self.recent_action = action
@@ -272,6 +272,7 @@ class DQNAgent(AbstractDQNAgent):
         return action
 
     def backward(self, reward, terminal):
+        #print self.recent_observation, self.recent_action, reward, terminal
         # Store most recent experience in memory.
         if self.step % self.memory_interval == 0:
             self.memory.append(self.recent_observation, self.recent_action, reward, terminal,
@@ -298,6 +299,7 @@ class DQNAgent(AbstractDQNAgent):
                 action_batch = [[] for _ in range(len(experiences))]
                 terminal1_batch = [[] for _ in range(len(experiences))]
                 state1_batch = [[] for _ in range(len(experiences))]
+                
                 for sequence_idx, sequence in enumerate(experiences):
                     for e in sequence:
                         state0_batch[sequence_idx].append(e.state0)
@@ -313,8 +315,8 @@ class DQNAgent(AbstractDQNAgent):
                         state1_batch[sequence_idx].append(np.zeros(state_shape))
                         reward_batch[sequence_idx].append(0.)
                         action_batch[sequence_idx].append(0)
-                        terminal1_batch[sequence_idx].append(1.)
-
+                        terminal1_batch[sequence_idx].append(0.)
+                
                 state0_batch = self.process_state_batch(state0_batch)
                 state1_batch = self.process_state_batch(state1_batch)
                 terminal1_batch = np.array(terminal1_batch)
@@ -401,6 +403,8 @@ class DQNAgent(AbstractDQNAgent):
             discounted_reward_batch *= terminal1_batch
             assert discounted_reward_batch.shape == reward_batch.shape
             Rs = reward_batch + discounted_reward_batch
+            #print 'Rs'
+            #print Rs
             if self.is_recurrent:
                 for batch_idx, (inner_targets, inner_masks, inner_Rs, inner_action_batch, length) in enumerate(zip(targets, masks, Rs, action_batch, lengths)):
                     for idx, (target, mask, R, action) in enumerate(zip(inner_targets, inner_masks, inner_Rs, inner_action_batch)):
@@ -408,12 +412,14 @@ class DQNAgent(AbstractDQNAgent):
                         dummy_targets[batch_idx, idx] = R
                         if idx < length:  # only enable loss for valid transitions
                             mask[action] = 1.  # enable loss for this specific action
+                    #print inner_targets, inner_masks, inner_Rs, inner_action_batch, length
 
             else:
                 for idx, (target, mask, R, action) in enumerate(zip(targets, masks, Rs, action_batch)):
                     target[action] = R  # update action with estimated accumulated reward
                     dummy_targets[idx] = R
                     mask[action] = 1.  # enable loss for this specific action
+                #print targets, masks, Rs, action_batch
 
             targets = np.array(targets).astype('float32')
             masks = np.array(masks).astype('float32')
@@ -770,7 +776,7 @@ class NAFAgent(AbstractDQNAgent):
 
     def forward(self, observation):
         # Select an action.
-        state = self.memory.get_recent_state(observation)
+        state = self.memory.get_recent_states(observation)
         action = self.select_action(state)
         if self.processor is not None:
             action = self.processor.process_action(action)
