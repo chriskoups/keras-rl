@@ -285,7 +285,7 @@ def test_sequential_sampling():
     memory.append(obs5, action5, reward5, terminal6)
     assert memory.nb_entries == 6
 
-    experiences = memory.sample(batch_size=3, batch_idxs=[2, 3, 4])
+    experiences = memory.sample(batch_size=3, batch_idxs=[2, 3, 4])[0]
     assert len(experiences) == 3
 
     print experiences[0].state0

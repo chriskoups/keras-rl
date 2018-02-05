@@ -178,7 +178,14 @@ class SequentialMemory(Memory):
         assert len(batch_idxs) == batch_size
         
         # Create experiences
+        state0_batch = np.zeros((batch_size, self.window_length,) + shape_from_object(self.observations[0]))
+        action_batch = np.zeros((batch_size, self.window_length,) + shape_from_object(self.actions[0]))
+        reward_batch = np.zeros((batch_size, self.window_length,) + shape_from_object(self.rewards[0]))
+        state1_batch = np.zeros((batch_size, self.window_length,) + shape_from_object(self.observations[0]))
+        terminal_batch = np.zeros((batch_size, self.window_length,) + shape_from_object(self.terminals[0]))
+        
         experiences = []
+        batch = 0
         for idx in batch_idxs:
             state0 = np.zeros((self.window_length,) + shape_from_object(self.observations[0]))
             state_idx = self.window_length - 1
@@ -196,10 +203,17 @@ class SequentialMemory(Memory):
             state1.append(self.observations[idx+1])
             assert len(state1) == self.window_length
             
+            state0_batch[batch] = state0
+            action_batch[batch] = self.actions[idx]
+            reward_batch[batch] = self.rewards[idx]
+            state1_batch[batch] = state1
+            terminal_batch[batch] = self.terminals[idx]
+                                                                                            
             experiences.append(Experience(state0=state0, action=self.actions[idx], reward=self.rewards[idx],
                                           state1=state1, terminal1=self.terminals[idx]))
+            batch = batch + 1
         assert len(experiences) == batch_size
-        return experiences
+        return experiences, state0_batch, action_batch, reward_batch, state1_batch, terminal_batch
 
     def append(self, observation, action, reward, terminal, training=True):
         super(SequentialMemory, self).append(observation, action, reward, terminal, training=training)
