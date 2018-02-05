@@ -115,7 +115,7 @@ class Memory(object):
         self.recent_observations.append(observation)
         self.recent_terminals.append(terminal)
 
-    def get_recent_states(self, current_observation):
+    def get_recent_state(self, current_observation):
         if self.recent_observations == None:
             self.recent_observations = deque(np.zeros((self.window_length,) + shape_from_object(current_observation)), maxlen=self.window_length)
         

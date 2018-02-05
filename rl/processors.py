@@ -54,3 +54,13 @@ class WhiteningNormalizerProcessor(Processor):
             self.normalizer = WhiteningNormalizer(shape=batch.shape[1:], dtype=batch.dtype)
         self.normalizer.update(batch)
         return self.normalizer.normalize(batch)
+    
+class DiscreteInputRNNProcessor(Processor):
+    """RNNs require an input with an array of arrays
+
+    This will convert your array of discrete inputs to an array of arrays with size 1
+
+    # Arguments
+    """
+    def process_state_batch(self, state_batch):
+        return state_batch.reshape(state_batch.shape + (1,))

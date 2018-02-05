@@ -3,7 +3,7 @@ import warnings
 
 import keras.backend as K
 from keras.models import Model
-from keras.layers import Lambda, Input, Layer, Dense, TimeDistributed
+from keras.layers import Lambda, Input, Layer, Dense
 
 from rl.core import Agent
 from rl.policy import EpsGreedyQPolicy, GreedyQPolicy
@@ -54,19 +54,18 @@ class AbstractDQNAgent(Agent):
         self.compiled = False
 
     def process_state_batch(self, batch):
-        batch = np.array(batch)
         if self.processor is None:
             return batch
         return self.processor.process_state_batch(batch)
 
-    def compute_batch_q_values(self, state_batch):
-        batch = self.process_state_batch(state_batch)
-        q_values = self.policy_model.predict_on_batch(batch)
-        assert q_values.shape == (len(state_batch), self.nb_actions)
-        return q_values
-
     def compute_q_values(self, state):
-        q_values = self.compute_batch_q_values([state]).flatten()
+        if self.is_recurrent:
+            # Add time axis.
+            state = state.reshape((1,) + state.shape)
+        batch = self.process_state_batch(state)
+        q_values = self.policy_model.predict_on_batch(batch)[-1]
+        if self.is_recurrent:
+            q_values = q_values[-1]
         assert q_values.shape == (self.nb_actions,)
         return q_values
 
@@ -243,7 +242,7 @@ class DQNAgent(AbstractDQNAgent):
 
     def forward(self, observation):
         # Select an action.
-        state = self.memory.get_recent_states(observation)
+        state = self.memory.get_recent_state(observation)
         q_values = self.compute_q_values(state)
         if self.training:
             action = self.policy.select_action(q_values=q_values)
@@ -275,15 +274,18 @@ class DQNAgent(AbstractDQNAgent):
             experiences, state0_batch, action_batch, reward_batch, state1_batch, terminal1_batch = self.memory.sample(self.batch_size)
             assert len(experiences) == self.batch_size
 
+            # inverse logic
+            action_batch = np.array(action_batch).astype('int32')
+            terminal1_batch = abs((terminal1_batch - 1) * - 1)  
+            
             # Prepare and validate parameters.
             state0_batch = self.process_state_batch(state0_batch)
             state1_batch = self.process_state_batch(state1_batch)
-            
-            action_batch = np.array(action_batch).astype('int32')
-
-            assert action_batch.shape == (self.batch_size,)
+            terminal1_batch = np.array(terminal1_batch)
+            reward_batch = np.array(reward_batch)
             assert reward_batch.shape == (self.batch_size,)
-            assert terminal1_batch.shape == (self.batch_size,)
+            assert terminal1_batch.shape == reward_batch.shape
+            assert len(action_batch) == len(reward_batch)
 
             # Compute Q values for mini-batch update.
             if self.enable_double_dqn:
@@ -305,6 +307,8 @@ class DQNAgent(AbstractDQNAgent):
                 # We perform this prediction on the target_model instead of the model for reasons
                 # outlined in Mnih (2015). In short: it makes the algorithm more stable.
                 target_q_values = self.target_model.predict_on_batch(state1_batch)
+                if self.is_recurrent:
+                    target_q_values = target_q_values[:,-1,:]
                 assert target_q_values.shape == (self.batch_size, self.nb_actions)
                 q_batch = np.max(target_q_values, axis=1).flatten()
             assert q_batch.shape == (self.batch_size,)
@@ -326,10 +330,17 @@ class DQNAgent(AbstractDQNAgent):
                 mask[action] = 1.  # enable loss for this specific action
             targets = np.array(targets).astype('float32')
             masks = np.array(masks).astype('float32')
+            
+            #if self.is_recurrent:
+            #    targets = targets.reshape(targets.shape + (1,))
+            #    masks = masks.reshape(masks.shape + (1,))
+            #    dummy_targets = dummy_targets.reshape(dummy_targets.shape + (1,))
 
             # Finally, perform a single update on the entire batch. We use a dummy target since
             # the actual loss is computed in a Lambda layer that needs more complex input. However,
             # it is still useful to know the actual target to compute metrics properly.
+            print state0_batch.shape, targets.shape, masks.shape, dummy_targets.shape
+            
             ins = [state0_batch] if type(self.model.input) is not list else state0_batch
             metrics = self.trainable_model.train_on_batch(ins + [targets, masks], [dummy_targets, targets])
             metrics = [metric for idx, metric in enumerate(metrics) if idx not in (1, 2)]  # throw away individual losses
@@ -355,8 +366,8 @@ class DQNAgent(AbstractDQNAgent):
         model_metrics = [name.replace(dummy_output_name + '_', '') for name in model_metrics]
 
         names = model_metrics + self.policy.metrics_names[:]
-        if self.processor is not None:
-            names += self.processor.metrics_names[:]
+        #if self.processor is not None:
+        #    names += self.processor.metrics_names[:]
         return names
 
     @property
@@ -653,7 +664,7 @@ class NAFAgent(AbstractDQNAgent):
 
     def forward(self, observation):
         # Select an action.
-        state = self.memory.get_recent_states(observation)
+        state = self.memory.get_recent_state(observation)
         action = self.select_action(state)
         if self.processor is not None:
             action = self.processor.process_action(action)
