@@ -239,8 +239,7 @@ class SequentialMemory(Memory):
     @property
     def is_episodic(self):
         return False
-
-
+    
 class EpisodicMemory(Memory):
     def __init__(self, limit, **kwargs):
         super(EpisodicMemory, self).__init__(**kwargs)
@@ -264,15 +263,21 @@ class EpisodicMemory(Memory):
 
         # Create sequence of experiences.
         sequences = []
+        state0_eps = []
+        action_eps = []
+        reward_eps = []
+        terminal1_eps = []
+        state1_eps = []
+        
         for idx in batch_idxs:
             episode = self.episodes[idx]
-            while len(episode) == 0:
-                idx = sample_batch_indexes(0, self.nb_entries, size=1)[0]
+            #while len(episode) == 0:
+            #    idx = sample_batch_indexes(0, self.nb_entries, size=1)[0]
 
             # Bootstrap state.
             running_state = deque(maxlen=self.window_length)
             for _ in range(self.window_length - 1):
-                running_state.append(np.zeros(episode[0].observation.shape))
+                running_state.append(np.zeros(shape_from_object(episode[0].observation)))
             assert len(running_state) == self.window_length - 1
 
             states, rewards, actions, terminals = [], [], [], []
@@ -289,18 +294,33 @@ class EpisodicMemory(Memory):
 
             # Transform into experiences (to be consistent).
             sequence = []
+            state0_batch = []
+            action_batch = []
+            reward_batch = []
+            terminal1_batch = []
+            state1_batch = []
             for idx in range(len(episode) - 1):
                 state0 = states[idx]
                 state1 = states[idx + 1]
                 reward = rewards[idx]
                 action = actions[idx]
-                terminal1 = terminals[idx + 1]
+                terminal1 = terminals[idx+1]
                 experience = Experience(state0=state0, state1=state1, reward=reward, action=action, terminal1=terminal1)
                 sequence.append(experience)
+                state0_batch.append(state0)
+                action_batch.append(action)
+                reward_batch.append(reward)
+                terminal1_batch.append(terminal1)
+                state1_batch.append(state1)
             sequences.append(sequence)
+            state0_eps.append(state0_batch)
+            action_eps.append(action_batch)
+            reward_eps.append(reward_batch)
+            terminal1_eps.append(terminal1_batch)
+            state1_eps.append(state1_batch)
             assert len(sequence) == len(episode) - 1
         assert len(sequences) == batch_size
-        return sequences
+        return sequences, np.array(state0_eps), np.array(action_eps), np.array(reward_eps), np.array(state1_eps), np.array(terminal1_eps)
 
     def append(self, observation, action, reward, terminal, training=True):
         super(EpisodicMemory, self).append(observation, action, reward, terminal, training=training)

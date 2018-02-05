@@ -357,9 +357,9 @@ def test_episodic_sampling():
     memory.append(obs3, action3, reward3, terminal4)
     memory.append(obs4, action4, reward4, terminal5)
     memory.append(obs5, action5, reward5, terminal6)
-    assert memory.nb_entries == 2  # two episodes
+    assert memory.nb_entries == 2
 
-    sequences = memory.sample(batch_size=2, batch_idxs=[0, 1])
+    sequences = memory.sample(batch_size=2, batch_idxs=[0, 1])[0]
     assert len(sequences) == 2
     assert len(sequences[0]) == 3
     assert len(sequences[1]) == 1
@@ -388,6 +388,62 @@ def test_episodic_sampling():
     assert sequences[1][0].reward == reward4
     assert sequences[1][0].terminal1 is False
     
-
+import time
 if __name__ == '__main__':
     pytest.main([__file__])
+    quit(0)
+    
+    memory = EpisodicMemory(10, window_length=2, ignore_episode_boundaries=False)
+    obs_size = (3, 4)
+    actions = range(5)
+
+    obs0 = np.random.random(obs_size)
+    terminal0 = False
+    action0 = np.random.choice(actions)
+    reward0 = np.random.random()
+    
+    obs1 = np.random.random(obs_size)
+    terminal1 = False
+    action1 = np.random.choice(actions)
+    reward1 = np.random.random()
+    
+    obs2 = np.random.random(obs_size)
+    terminal2 = False
+    action2 = np.random.choice(actions)
+    reward2 = np.random.random()
+    
+    obs3 = np.random.random(obs_size)
+    terminal3 = True
+    action3 = np.random.choice(actions)
+    reward3 = np.random.random()
+
+    obs4 = np.random.random(obs_size)
+    terminal4 = False
+    action4 = np.random.choice(actions)
+    reward4 = np.random.random()
+
+    obs5 = np.random.random(obs_size)
+    terminal5 = False
+    action5 = np.random.choice(actions)
+    reward5 = np.random.random()
+
+    obs6 = np.random.random(obs_size)
+    terminal6 = False
+    action6 = np.random.choice(actions)
+    reward6 = np.random.random()
+    
+    # memory.append takes the current observation, the reward after taking an action and if
+    # the *new* observation is terminal, thus `obs0` and `terminal1` is correct.
+    for i in range(100000):
+        memory.append(obs0, action0, reward0, terminal1)
+        memory.append(obs1, action1, reward1, terminal2)
+        memory.append(obs2, action2, reward2, terminal3)
+        memory.append(obs3, action3, reward3, terminal4)
+        memory.append(obs4, action4, reward4, terminal5)
+        memory.append(obs5, action5, reward5, terminal6)
+    
+    start_time = time.time()
+    for i in range(100000):
+        memory.sample(batch_size=2, batch_idxs=[0, 1])
+    print("--- %s seconds ---" % (time.time() - start_time))
+    

@@ -199,8 +199,8 @@ class DQNAgent(AbstractDQNAgent):
         # ever want to update the Q values for a certain action. The way we achieve this is by
         # using a custom Lambda layer that computes the loss. This gives us the necessary flexibility
         # to mask out certain parameters by passing in multiple inputs to the Lambda layer.
-        input_shape = (self.nb_actions,)
-        output_shape = (1,)
+        input_shape = (None, self.nb_actions) if self.is_recurrent else (self.nb_actions,)
+        output_shape = (None, 1) if self.is_recurrent else (1,)
 
         y_pred = self.model.output
         y_true = Input(name='y_true', shape=input_shape)
@@ -243,6 +243,9 @@ class DQNAgent(AbstractDQNAgent):
     def forward(self, observation):
         # Select an action.
         state = self.memory.get_recent_state(observation)
+        if self.is_recurrent:
+            state = state.reshape(state.shape + (1,))
+            
         q_values = self.compute_q_values(state)
         if self.training:
             action = self.policy.select_action(q_values=q_values)
@@ -273,20 +276,17 @@ class DQNAgent(AbstractDQNAgent):
         if self.step > self.nb_steps_warmup and self.step % self.train_interval == 0:
             experiences, state0_batch, action_batch, reward_batch, state1_batch, terminal1_batch = self.memory.sample(self.batch_size)
             assert len(experiences) == self.batch_size
-
-            # inverse logic
-            action_batch = np.array(action_batch).astype('int32')
-            terminal1_batch = abs((terminal1_batch - 1) * - 1)  
             
             # Prepare and validate parameters.
             state0_batch = self.process_state_batch(state0_batch)
             state1_batch = self.process_state_batch(state1_batch)
-            terminal1_batch = np.array(terminal1_batch)
-            reward_batch = np.array(reward_batch)
-            assert reward_batch.shape == (self.batch_size,)
-            assert terminal1_batch.shape == reward_batch.shape
-            assert len(action_batch) == len(reward_batch)
-
+            action_batch = np.array(action_batch).astype('int32')   # only discrete actions allowed
+            terminal1_batch = abs((terminal1_batch - 1) * - 1)  # inverse logic here for scaling later
+            
+            assert len(action_batch) == self.batch_size
+            assert len(reward_batch) == self.batch_size
+            assert len(terminal1_batch) == self.batch_size
+            
             # Compute Q values for mini-batch update.
             if self.enable_double_dqn:
                 # According to the paper "Deep Reinforcement Learning with Double Q-learning"
@@ -307,41 +307,47 @@ class DQNAgent(AbstractDQNAgent):
                 # We perform this prediction on the target_model instead of the model for reasons
                 # outlined in Mnih (2015). In short: it makes the algorithm more stable.
                 target_q_values = self.target_model.predict_on_batch(state1_batch)
-                if self.is_recurrent:
-                    target_q_values = target_q_values[:,-1,:]
-                assert target_q_values.shape == (self.batch_size, self.nb_actions)
-                q_batch = np.max(target_q_values, axis=1).flatten()
-            assert q_batch.shape == (self.batch_size,)
-
-            targets = np.zeros((self.batch_size, self.nb_actions))
-            dummy_targets = np.zeros((self.batch_size,))
-            masks = np.zeros((self.batch_size, self.nb_actions))
-
+                assert len(target_q_values) == self.batch_size
+                assert len(target_q_values[0]) == self.nb_actions
+                q_batch = np.max(target_q_values, axis=-1)
+            assert len(q_batch) == self.batch_size
+            
+            targets = np.zeros(q_batch.shape + (self.nb_actions,))
+            masks = np.zeros(q_batch.shape + (self.nb_actions,))
+            if self.is_recurrent:
+                dummy_targets = np.zeros(q_batch.shape + (1,))
+            else:
+                dummy_targets = np.zeros(q_batch.shape)
+            
             # Compute r_t + gamma * max_a Q(s_t+1, a) and update the target targets accordingly,
             # but only for the affected output units (as given by action_batch).
             discounted_reward_batch = self.gamma * q_batch
+            
+            terminal1_batch.reshape(discounted_reward_batch.shape)
             # Set discounted reward to zero for all states that were terminal.
-            discounted_reward_batch *= terminal1_batch
+            if self.is_recurrent:
+                discounted_reward_batch *= terminal1_batch.reshape(discounted_reward_batch.shape)
+            else:
+                discounted_reward_batch *= terminal1_batch
             assert discounted_reward_batch.shape == reward_batch.shape
             Rs = reward_batch + discounted_reward_batch
-            for idx, (target, mask, R, action) in enumerate(zip(targets, masks, Rs, action_batch)):
-                target[action] = R  # update action with estimated accumulated reward
-                dummy_targets[idx] = R
-                mask[action] = 1.  # enable loss for this specific action
-            targets = np.array(targets).astype('float32')
-            masks = np.array(masks).astype('float32')
             
-            #if self.is_recurrent:
-            #    targets = targets.reshape(targets.shape + (1,))
-            #    masks = masks.reshape(masks.shape + (1,))
-            #    dummy_targets = dummy_targets.reshape(dummy_targets.shape + (1,))
-
+            if self.is_recurrent:
+                for idx, (target_i, mask_i, R_i, action_i) in enumerate(zip(targets, masks, Rs, action_batch)):
+                    for idx, (target, mask, R, action) in enumerate(zip(target_i, mask_i, R_i, action_i)):
+                        target[action] = R  # update action with estimated accumulated reward
+                        dummy_targets[idx] = R
+                        mask[action] = 1.  # enable loss for this specific action
+            else:
+                for idx, (target, mask, R, action) in enumerate(zip(targets, masks, Rs, action_batch)):
+                    target[action] = R  # update action with estimated accumulated reward
+                    dummy_targets[idx] = R
+                    mask[action] = 1.  # enable loss for this specific action
+                    
             # Finally, perform a single update on the entire batch. We use a dummy target since
             # the actual loss is computed in a Lambda layer that needs more complex input. However,
             # it is still useful to know the actual target to compute metrics properly.
-            print state0_batch.shape, targets.shape, masks.shape, dummy_targets.shape
-            
-            ins = [state0_batch] if type(self.model.input) is not list else state0_batch
+            ins = [state0_batch]
             metrics = self.trainable_model.train_on_batch(ins + [targets, masks], [dummy_targets, targets])
             metrics = [metric for idx, metric in enumerate(metrics) if idx not in (1, 2)]  # throw away individual losses
             metrics += self.policy.metrics
