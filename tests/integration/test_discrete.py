@@ -13,11 +13,7 @@ from rl.agents import DQNAgent, CEMAgent, SARSAAgent
 from rl.policy import EpsGreedyQPolicy
 from rl.memory import SequentialMemory, EpisodeParameterMemory, EpisodicMemory
 
-import time
-from rl.memory import RingBuffer
-from collections import deque
-
-def test_dqn():    
+def test_dqn():
     env = TwoRoundDeterministicRewardEnv()
     np.random.seed(123)
     env.seed(123)

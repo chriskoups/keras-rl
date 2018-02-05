@@ -1,0 +1,3 @@
+[style]
+# Keras-rl uses the pep8 style
+based_on_style = pep8

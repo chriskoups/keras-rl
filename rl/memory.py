@@ -179,10 +179,10 @@ class SequentialMemory(Memory):
         
         # Create experiences
         state0_batch = np.zeros((batch_size, self.window_length,) + shape_from_object(self.observations[0]))
-        action_batch = np.zeros((batch_size, self.window_length,) + shape_from_object(self.actions[0]))
-        reward_batch = np.zeros((batch_size, self.window_length,) + shape_from_object(self.rewards[0]))
+        action_batch = np.zeros((batch_size,) + shape_from_object(self.actions[0]))
+        reward_batch = np.zeros((batch_size,) + shape_from_object(self.rewards[0]))
         state1_batch = np.zeros((batch_size, self.window_length,) + shape_from_object(self.observations[0]))
-        terminal_batch = np.zeros((batch_size, self.window_length,) + shape_from_object(self.terminals[0]))
+        terminal_batch = np.zeros((batch_size,) + shape_from_object(self.terminals[0]))
         
         experiences = []
         batch = 0
@@ -201,6 +201,7 @@ class SequentialMemory(Memory):
             
             state1 = [np.copy(x) for x in state0[1:]]
             state1.append(self.observations[idx+1])
+            state1 = np.array(state1)
             assert len(state1) == self.window_length
             
             state0_batch[batch] = state0

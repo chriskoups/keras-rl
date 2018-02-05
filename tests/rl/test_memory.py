@@ -133,9 +133,6 @@ def test_training_flag():
         for memory in memories:
             state = np.array(memory.get_recent_states(obs0))
             assert state.shape == (2,) + obs_size
-            print state.shape
-            print obs0
-            print state
             assert np.allclose(state[0], 0.)
             assert np.all(state[1] == obs0)
             assert memory.nb_entries == 0
@@ -192,7 +189,7 @@ def test_get_recent_states_without_episode_boundaries():
         terminal6 = False
         
         state = np.array(memory.get_recent_states(obs0))
-        assert state.shape == (2,) + obs_size
+        assert state.shape == (memory.window_length,) + obs_size
         assert np.allclose(state[0], 0.)
         assert np.all(state[1] == obs0)
 
@@ -200,37 +197,37 @@ def test_get_recent_states_without_episode_boundaries():
         # the *new* observation is terminal, thus `obs0` and `terminal1` is correct.
         memory.append(obs0, 0, 0., terminal1)
         state = np.array(memory.get_recent_states(obs1))
-        assert state.shape == (2,) + obs_size
+        assert state.shape == (memory.window_length,) + obs_size
         assert np.all(state[0] == obs0)
         assert np.all(state[1] == obs1)
 
         memory.append(obs1, 0, 0., terminal2)
         state = np.array(memory.get_recent_states(obs2))
-        assert state.shape == (2,) + obs_size
+        assert state.shape == (memory.window_length,) + obs_size
         assert np.all(state[0] == obs1)
         assert np.all(state[1] == obs2)
 
         memory.append(obs2, 0, 0., terminal3)
         state = np.array(memory.get_recent_states(obs3))
-        assert state.shape == (2,) + obs_size
+        assert state.shape == (memory.window_length,) + obs_size
         assert np.all(state[0] == obs2)
         assert np.all(state[1] == obs3)
 
         memory.append(obs3, 0, 0., terminal4)
         state = np.array(memory.get_recent_states(obs4))
-        assert state.shape == (2,) + obs_size
+        assert state.shape == (memory.window_length,) + obs_size
         assert np.all(state[0] == obs3)
         assert np.all(state[1] == obs4)
 
         memory.append(obs4, 0, 0., terminal5)
         state = np.array(memory.get_recent_states(obs5))
-        assert state.shape == (2,) + obs_size
+        assert state.shape == (memory.window_length,) + obs_size
         assert np.all(state[0] == obs4)
         assert np.all(state[1] == obs5)
 
         memory.append(obs5, 0, 0., terminal6)
         state = np.array(memory.get_recent_states(obs6))
-        assert state.shape == (2,) + obs_size
+        assert state.shape == (memory.window_length,) + obs_size
         assert np.all(state[0] == obs5)
         assert np.all(state[1] == obs6)
 
@@ -287,9 +284,9 @@ def test_sequential_sampling():
 
     experiences = memory.sample(batch_size=3, batch_idxs=[2, 3, 4])[0]
     assert len(experiences) == 3
+    assert experiences[0].state0.shape == (memory.window_length,) + obs_size
+    assert experiences[0].state1.shape == (memory.window_length,) + obs_size
 
-    print experiences[0].state0
-    print np.array([obs1, obs2])
     assert_allclose(experiences[0].state0, np.array([obs1, obs2]))
     assert_allclose(experiences[0].state1, np.array([obs2, obs3]))
     assert experiences[0].action == action2
@@ -299,11 +296,12 @@ def test_sequential_sampling():
     # Next experience has been re-sampled since since state0 would be terminal in which case we
     # cannot really have a meaningful transition because the environment gets reset. We thus
     # just ensure that state0 is not terminal.
+    assert experiences[1].state0.shape == (memory.window_length,) + obs_size
+    assert experiences[1].state1.shape == (memory.window_length,) + obs_size
     assert not np.all(experiences[1].state0[1] == np.array([obs2, obs3]))
     
-    print experiences[2].state0
-    print np.array([np.zeros(obs_size), obs4])
-
+    assert experiences[2].state0.shape == (memory.window_length,) + obs_size
+    assert experiences[2].state1.shape == (memory.window_length,) + obs_size
     assert_allclose(experiences[2].state0, np.array([np.zeros(obs_size), obs4]))
     assert_allclose(experiences[2].state1, np.array([obs4, obs5]))
     assert experiences[2].action == action4
