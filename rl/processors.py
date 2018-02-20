@@ -3,6 +3,8 @@ import numpy as np
 from rl.core import Processor
 from rl.util import WhiteningNormalizer
 
+from gym import spaces
+
 
 class MultiInputProcessor(Processor):
     """Converts observations from an environment with multiple observations for use in a neural network
@@ -55,3 +57,71 @@ class WhiteningNormalizerProcessor(Processor):
         self.normalizer.update(batch)
         return self.normalizer.normalize(batch)
     
+class ContinuousToDiscreteActions(Processor):
+    """Converts continuous actions to discrete
+    """
+    def __init__(self, min_action, max_action):
+        self.min = round(min_action)
+        self.max = round(max_action)
+        self.action = None
+
+    def process_action(self, action):
+        if self.action is None:
+            self.action = action[0]
+
+        action = round(action)
+        if action < self.min:
+            action= self.min
+        elif action > self.max:
+            action = self.max
+            
+        return int(action)
+    
+    def process_reward(self, reward):
+        if self.action < self.min or self.action > self.max:
+            reward -= abs(self.action)  
+        self.action = None
+        return reward
+    
+class MultiModeCartpole(Processor):
+    """Augment classical cartpole problem to reduce the observability of the state.
+    
+    The states of cart speed and pole speed are removed leaving only cart position and pole angle.
+    
+    Additinally, the effectiveness of the action is augmented with a mode switch. In mode A, action 0
+    causes the cart to move left and action 1 causes the cart to move right. In mode B, the is reversed
+    with action 0 moving the cart right and action 1 moving it left. This mode is randomly choosen at
+    the start of a new episode. The mode is also added to the observation for the first 50 steps of 
+    an episode after which the observation of the mode is set to 0.
+    
+    This problem is only solvable with a recurrent netwrok architecture.  
+    """
+    def __init__(self, min_action, max_action):
+        self.steps = 0  # total steps in episode
+        self.mode = 1   # mode 1: action 1 will push left and action 2 will push right. mode 2: inversed behavior
+
+    def process_step(self, observation, reward, done, info):
+        self.steps += 1
+        if done:
+            self.steps = 0
+            self.mode = 2 * np.random.random_integers(low=0, high=1, size=1)[0] - 1 # random number either -1 or 1
+            
+        observation = self.process_observation(observation)
+        reward = self.process_reward(reward)
+        info = self.process_info(info)
+        
+        return observation, reward, done, info
+        
+    def process_observation(self, observation):
+        # remove observations of cart and pole velocities 
+        observation = observation[[0,2]]
+        
+        # add action mode for first second of the episode
+        if steps < 50:
+            observation.append(self.mode)
+        else:
+            observation.append(0)
+        return np.array(observation)
+        
+    def process_action(self, action):
+        return (action * self.mode)

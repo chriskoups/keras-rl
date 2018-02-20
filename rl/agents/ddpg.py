@@ -188,13 +188,12 @@ class DDPGAgent(Agent):
             self.target_critic.reset_states()
 
     def process_state_batch(self, batch):
-        batch = np.array(batch)
         if self.processor is None:
             return batch
         return self.processor.process_state_batch(batch)
 
     def select_action(self, state):
-        batch = self.process_state_batch([state])
+        batch = self.process_state_batch(state)
         action = self.actor.predict_on_batch(batch).flatten()
         assert action.shape == (self.nb_actions,)
 
@@ -208,7 +207,7 @@ class DDPGAgent(Agent):
 
     def forward(self, observation):
         # Select an action.
-        state = self.memory.get_recent_states(observation)
+        state = self.memory.get_recent_state(observation)
         action = self.select_action(state)  # TODO: move this into policy
         if self.processor is not None:
             action = self.processor.process_action(action)
@@ -233,6 +232,7 @@ class DDPGAgent(Agent):
     def backward(self, reward, terminal=False):
         # Store most recent experience in memory.
         if self.step % self.memory_interval == 0:
+            print reward
             self.memory.append(self.recent_observation, self.recent_action, reward, terminal,
                                training=self.training)
 
@@ -245,31 +245,20 @@ class DDPGAgent(Agent):
         # Train the network on a single stochastic batch.
         can_train_either = self.step > self.nb_steps_warmup_critic or self.step > self.nb_steps_warmup_actor
         if can_train_either and self.step % self.train_interval == 0:
-            experiences = self.memory.sample(self.batch_size)
+            experiences, state0_batch, action_batch, reward_batch, state1_batch, terminal1_batch = self.memory.sample(self.batch_size)
             assert len(experiences) == self.batch_size
-
-            # Start by extracting the necessary parameters (we use a vectorized implementation).
-            state0_batch = []
-            reward_batch = []
-            action_batch = []
-            terminal1_batch = []
-            state1_batch = []
-            for e in experiences:
-                state0_batch.append(e.state0)
-                state1_batch.append(e.state1)
-                reward_batch.append(e.reward)
-                action_batch.append(e.action)
-                terminal1_batch.append(0. if e.terminal1 else 1.)
 
             # Prepare and validate parameters.
             state0_batch = self.process_state_batch(state0_batch)
             state1_batch = self.process_state_batch(state1_batch)
-            terminal1_batch = np.array(terminal1_batch)
-            reward_batch = np.array(reward_batch)
-            action_batch = np.array(action_batch)
-            assert reward_batch.shape == (self.batch_size,)
-            assert terminal1_batch.shape == reward_batch.shape
-            assert action_batch.shape == (self.batch_size, self.nb_actions)
+            terminal1_batch = np.invert(terminal1_batch)  # invert terminal for later
+            
+            assert len(action_batch) == self.batch_size
+            assert len(reward_batch) == self.batch_size
+            assert len(terminal1_batch) == self.batch_size
+            #assert reward_batch.shape == (self.batch_size,)
+            #assert terminal1_batch.shape == reward_batch.shape
+            #assert action_batch.shape == (self.batch_size, self.nb_actions)
 
             # Update critic, if warm up is over.
             if self.step > self.nb_steps_warmup_critic:

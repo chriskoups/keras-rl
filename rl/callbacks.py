@@ -346,3 +346,8 @@ class ModelIntervalCheckpoint(Callback):
         if self.verbose > 0:
             print('Step {}: saving model to {}'.format(self.total_steps, filepath))
         self.model.save_weights(filepath, overwrite=True)
+        
+        
+class ResetStatesCallback(Callback):
+    def on_episode_begin(self, episode, logs={}):
+        self.model.policy_model.reset_states()

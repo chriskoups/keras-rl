@@ -9,6 +9,9 @@ from rl.core import Agent
 from rl.policy import EpsGreedyQPolicy, GreedyQPolicy
 from rl.util import *
 
+import numpy as np
+np.set_printoptions(threshold=np.nan)
+import time
 
 def mean_q(y_true, y_pred):
     return K.mean(K.max(y_pred, axis=-1))
@@ -55,18 +58,16 @@ class AbstractDQNAgent(Agent):
 
     def process_state_batch(self, batch):
         if self.processor is None:
+            if self.is_recurrent:
+                while batch.ndim < 3:
+                    # discreet inputs must be converted to arrays for recurrent inputs
+                    batch = batch.reshape(batch.shape + (1,))
             return batch
         return self.processor.process_state_batch(batch)
 
     def compute_q_values(self, state):
-        if self.is_recurrent:
-            # Add time axis.
-            state = state.reshape((1,) + state.shape)
         batch = self.process_state_batch(state)
-        q_values = self.policy_model.predict_on_batch(batch)[-1]
-        if self.is_recurrent:
-            q_values = q_values[-1]
-        assert q_values.shape == (self.nb_actions,)
+        q_values = self.policy_model.predict_on_batch(batch)[0,-1,:]
         return q_values
 
     def get_config(self):
@@ -90,7 +91,7 @@ class DQNAgent(AbstractDQNAgent):
     """
     def __init__(self, model, policy=None, test_policy=None,
                  enable_double_dqn=True, enable_dueling_network=False, dueling_type='avg',
-                 target_model=None, policy_model=None, nb_max_steps_recurrent_unrolling=100,
+                 target_model=None, policy_model=None, nb_max_steps_recurrent_unrolling=None,
                  *args, **kwargs):
         super(DQNAgent, self).__init__(*args, **kwargs)
 
@@ -108,8 +109,8 @@ class DQNAgent(AbstractDQNAgent):
             memory = kwargs['memory']
             #if not memory.is_episodic:
             #    raise ValueError('Recurrent Q learning requires an episodic memory. You are trying to use it with memory={} instead.'.format(memory))
-            #if nb_max_steps_recurrent_unrolling and not model.stateful:
-            #    raise ValueError('Recurrent Q learning with max. unrolling requires a stateful model.')
+            if nb_max_steps_recurrent_unrolling and not model.stateful:
+                raise ValueError('Recurrent Q learning with max. unrolling requires a stateful model.')
             if policy_model is None or not policy_model.stateful:
                 raise ValueError('Recurrent Q learning requires a separate stateful policy model with batch_size=1. Please refer to an example to see how to properly set it up.')
 
@@ -117,6 +118,8 @@ class DQNAgent(AbstractDQNAgent):
         self.enable_double_dqn = enable_double_dqn
         self.enable_dueling_network = enable_dueling_network
         self.dueling_type = dueling_type
+        self.nb_max_steps_recurrent_unrolling = nb_max_steps_recurrent_unrolling
+        
         if self.enable_dueling_network:
             # get the second last layer of the model, abandon the last layer
             layer = model.layers[-2]
@@ -207,15 +210,15 @@ class DQNAgent(AbstractDQNAgent):
         mask = Input(name='mask', shape=input_shape)
         loss_out = Lambda(clipped_masked_error, output_shape=output_shape, name='loss')([y_pred, y_true, mask])
         ins = [self.model.input] if type(self.model.input) is not list else self.model.input
-        trainable_model = Model(inputs=ins + [y_true, mask], outputs=[loss_out, y_pred])
-        assert len(trainable_model.output_names) == 2
-        combined_metrics = {trainable_model.output_names[1]: metrics}
+        
+        self.trainable_model = Model(inputs=ins + [y_true, mask], outputs=[loss_out, y_pred])
+        assert len(self.trainable_model.output_names) == 2
+        combined_metrics = {self.trainable_model.output_names[1]: metrics}
         losses = [
             lambda y_true, y_pred: y_pred,  # loss is computed in Lambda layer
             lambda y_true, y_pred: K.zeros_like(y_pred),  # we only include this for the metrics
         ]
-        trainable_model.compile(optimizer=optimizer, loss=losses, metrics=combined_metrics)
-        self.trainable_model = trainable_model
+        self.trainable_model.compile(optimizer=optimizer, loss=losses, metrics=combined_metrics)
 
         self.update_target_model_hard()
         self.compiled = True
@@ -241,11 +244,9 @@ class DQNAgent(AbstractDQNAgent):
             self.policy_model.set_weights(self.model.get_weights())
 
     def forward(self, observation):
+        #start_time = time.time()
         # Select an action.
         state = self.memory.get_recent_state(observation)
-        if self.is_recurrent:
-            state = state.reshape(state.shape + (1,))
-            
         q_values = self.compute_q_values(state)
         if self.training:
             action = self.policy.select_action(q_values=q_values)
@@ -257,10 +258,12 @@ class DQNAgent(AbstractDQNAgent):
         # Book-keeping.
         self.recent_observation = observation
         self.recent_action = action
+        #print 'forward pass: ', str(time.time() - start_time)
 
         return action
 
     def backward(self, reward, terminal):
+        #start_time = time.time()
         # Store most recent experience in memory.
         if self.step % self.memory_interval == 0:
             self.memory.append(self.recent_observation, self.recent_action, reward, terminal,
@@ -271,7 +274,7 @@ class DQNAgent(AbstractDQNAgent):
             # We're done here. No need to update the experience memory since we only use the working
             # memory to obtain the state over the most recent observations.
             return metrics
-
+        
         # Train the network on a single stochastic batch.
         if self.step > self.nb_steps_warmup and self.step % self.train_interval == 0:
             experiences, state0_batch, action_batch, reward_batch, state1_batch, terminal1_batch = self.memory.sample(self.batch_size)
@@ -280,8 +283,7 @@ class DQNAgent(AbstractDQNAgent):
             # Prepare and validate parameters.
             state0_batch = self.process_state_batch(state0_batch)
             state1_batch = self.process_state_batch(state1_batch)
-            action_batch = np.array(action_batch).astype('int32')   # only discrete actions allowed
-            terminal1_batch = abs((terminal1_batch - 1) * - 1)  # inverse logic here for scaling later
+            terminal1_batch = np.invert(terminal1_batch)  # invert terminal for later
             
             assert len(action_batch) == self.batch_size
             assert len(reward_batch) == self.batch_size
@@ -308,7 +310,7 @@ class DQNAgent(AbstractDQNAgent):
                 # outlined in Mnih (2015). In short: it makes the algorithm more stable.
                 target_q_values = self.target_model.predict_on_batch(state1_batch)
                 assert len(target_q_values) == self.batch_size
-                assert len(target_q_values[0]) == self.nb_actions
+                assert target_q_values.shape[-1] == self.nb_actions
                 q_batch = np.max(target_q_values, axis=-1)
             assert len(q_batch) == self.batch_size
             
@@ -323,7 +325,6 @@ class DQNAgent(AbstractDQNAgent):
             # but only for the affected output units (as given by action_batch).
             discounted_reward_batch = self.gamma * q_batch
             
-            terminal1_batch.reshape(discounted_reward_batch.shape)
             # Set discounted reward to zero for all states that were terminal.
             if self.is_recurrent:
                 discounted_reward_batch *= terminal1_batch.reshape(discounted_reward_batch.shape)
@@ -333,30 +334,64 @@ class DQNAgent(AbstractDQNAgent):
             Rs = reward_batch + discounted_reward_batch
             
             if self.is_recurrent:
-                for idx, (target_i, mask_i, R_i, action_i) in enumerate(zip(targets, masks, Rs, action_batch)):
-                    for idx, (target, mask, R, action) in enumerate(zip(target_i, mask_i, R_i, action_i)):
+                for idx, (target_i, mask_i, R_i, action_i, terminal_i) in enumerate(zip(targets, masks, Rs, action_batch, terminal1_batch)):
+                    for target, mask, R, action, terminal in zip(target_i, mask_i, R_i, action_i, terminal_i):
                         target[action] = R  # update action with estimated accumulated reward
                         dummy_targets[idx] = R
                         mask[action] = 1.  # enable loss for this specific action
+                        if not terminal:
+                            break   # stop after terminal step
             else:
-                for idx, (target, mask, R, action) in enumerate(zip(targets, masks, Rs, action_batch)):
+                for idx, (target, mask, R, action, terminal) in enumerate(zip(targets, masks, Rs, action_batch, terminal1_batch)):
                     target[action] = R  # update action with estimated accumulated reward
                     dummy_targets[idx] = R
                     mask[action] = 1.  # enable loss for this specific action
-                    
-            # Finally, perform a single update on the entire batch. We use a dummy target since
-            # the actual loss is computed in a Lambda layer that needs more complex input. However,
-            # it is still useful to know the actual target to compute metrics properly.
-            ins = [state0_batch]
-            metrics = self.trainable_model.train_on_batch(ins + [targets, masks], [dummy_targets, targets])
-            metrics = [metric for idx, metric in enumerate(metrics) if idx not in (1, 2)]  # throw away individual losses
+                    if not terminal:
+                        break   # stop after terminal step
+            
+            # In the recurrent case, we support splitting the sequences into multiple
+            # chunks. Each chunk is then used as a training example. The reason for this is that,
+            # for too long episodes, the unrolling in time during backpropagation can exceed the
+            # memory of the GPU (or, to a lesser degree, the RAM if training on CPU).
+            if self.is_recurrent and self.nb_max_steps_recurrent_unrolling:
+                assert targets.ndim == 3
+                steps = targets.shape[1]  # (batch_size, steps, actions)
+                nb_chunks = int(np.ceil(float(steps) / float(self.nb_max_steps_recurrent_unrolling)))
+                chunks = []
+                for chunk_idx in range(nb_chunks):
+                    start = chunk_idx * self.nb_max_steps_recurrent_unrolling
+                    t = targets[:, start:start + self.nb_max_steps_recurrent_unrolling, ...]
+                    m = masks[:, start:start + self.nb_max_steps_recurrent_unrolling, ...]
+                    iss = state0_batch[:, start:start + self.nb_max_steps_recurrent_unrolling, ...]
+                    dt = dummy_targets[:, start:start + self.nb_max_steps_recurrent_unrolling, ...]
+                    chunks.append(([iss], t, m, dt))
+            else:
+                chunks = [([state0_batch], targets, masks, dummy_targets)]
+
+            #print 'backward pass prep: ', str(time.time() - start_time)
+            
+            if self.is_recurrent:
+                self.model.reset_states()
+
+            #start_time = time.time()
+            metrics = []
+            for i, t, m, dt in chunks:
+                # Finally, perform a single update on the entire batch. We use a dummy target since
+                # the actual loss is computed in a Lambda layer that needs more complex input. However,
+                # it is still useful to know the actual target to compute metrics properly.
+                ms = self.trainable_model.train_on_batch(i + [t, m], [dt, t])
+                ms = [metric for idx, metric in enumerate(ms) if idx not in (1, 2)]  # throw away individual losses
+                metrics.append(ms)
+            metrics = np.mean(metrics, axis=0).tolist()
             metrics += self.policy.metrics
             if self.processor is not None:
                 metrics += self.processor.metrics
+                
+            #print 'Training pass: ', str(time.time() - start_time)
 
         if self.target_model_update >= 1 and self.step % self.target_model_update == 0:
             self.update_target_model_hard()
-
+            
         return metrics
 
     @property

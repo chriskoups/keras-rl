@@ -4,6 +4,7 @@ import argparse
 
 import numpy as np
 from numpy.testing import assert_allclose
+import gym
 from gym.envs.debugging.two_round_deterministic_reward import TwoRoundDeterministicRewardEnv
 
 from keras.models import Sequential
@@ -11,34 +12,61 @@ from keras.layers import Dense, Activation, Flatten, TimeDistributed, LSTM, Resh
 from keras.optimizers import Adam
 from rl.agents import DQNAgent, CEMAgent, SARSAAgent
 from rl.policy import EpsGreedyQPolicy
-from rl.memory import SequentialMemory, EpisodeParameterMemory, EpisodicMemory
+from rl.memory import Memory, SequentialMemory, EpisodeParameterMemory, EpisodicMemory, PrioritizedEpisodicMemory, WindowedMemory
+from rl.callbacks import ResetStatesCallback
 
 def test_dqn():
+    print 'Testing DQN on two round deterministic problem'
     env = TwoRoundDeterministicRewardEnv()
     np.random.seed(123)
     env.seed(123)
     random.seed(123)
     nb_actions = env.action_space.n
-
+    
     # Next, we build a very simple model.
     model = Sequential()
     model.add(Dense(16, input_shape=(1,)))
     model.add(Activation('relu'))
     model.add(Dense(nb_actions))
     model.add(Activation('linear'))
-
-    memory = SequentialMemory(limit=1000, window_length=1)
+    
+    memory = Memory(limit=100)
     policy = EpsGreedyQPolicy(eps=.1)
     dqn = DQNAgent(model=model, nb_actions=nb_actions, memory=memory, nb_steps_warmup=50,
                    target_model_update=1e-1, policy=policy, enable_double_dqn=False)
     dqn.compile(Adam(lr=1e-3))
-
+    
     dqn.fit(env, nb_steps=2000, visualize=False, verbose=0)
     policy.eps = 0.
     h = dqn.test(env, nb_episodes=20, visualize=False)
     assert_allclose(np.mean(h.history['episode_reward']), 3.)
 
+    
+    print 'Testing DQN on cartpole problem'
+    env = gym.make('CartPole-v0')
+    np.random.seed(123)
+    env.seed(123)
+    random.seed(123)
+    nb_actions = env.action_space.n
+    
+    # Next, we build a very simple model.
+    model = Sequential()
+    model.add(Dense(16, input_shape=env.observation_space.shape, activation='relu'))
+    model.add(Dense(16, activation='relu'))
+    model.add(Dense(nb_actions))
+    model.add(Activation('linear'))
 
+    memory = Memory(limit=1000)
+    policy = EpsGreedyQPolicy(eps=.1)
+    dqn = DQNAgent(model=model, nb_actions=nb_actions, memory=memory, nb_steps_warmup=100,
+                   target_model_update=1e-1, policy=policy, enable_double_dqn=False, batch_size=64)
+    dqn.compile(Adam(lr=1e-3))
+
+    dqn.fit(env, nb_steps=20000, visualize=False, verbose=0)
+    policy.eps = 0.
+    h = dqn.test(env, nb_episodes=20, visualize=False)
+    assert np.mean(h.history['episode_reward']) > 195.
+    
 def test_double_dqn():
     env = TwoRoundDeterministicRewardEnv()
     np.random.seed(123)
@@ -53,7 +81,7 @@ def test_double_dqn():
     model.add(Dense(nb_actions))
     model.add(Activation('linear'))
 
-    memory = SequentialMemory(limit=1000, window_length=1)
+    memory = Memory(limit=500)
     policy = EpsGreedyQPolicy(eps=.1)
     dqn = DQNAgent(model=model, nb_actions=nb_actions, memory=memory, nb_steps_warmup=50,
                    target_model_update=1e-1, policy=policy, enable_double_dqn=True)
@@ -66,36 +94,104 @@ def test_double_dqn():
 
 
 def test_recurrent_dqn():
-    env = TwoRoundDeterministicRewardEnv()
+#     print 'Testing DQN on two round deterministic environment'
+#     env = TwoRoundDeterministicRewardEnv()
+#     np.random.seed(123)
+#     env.seed(123)
+#     random.seed(123)
+#     nb_actions = env.action_space.n
+#     batch_size = 1
+#          
+#     # Next, we build a very simple model.
+#     policy_model = Sequential()
+#     policy_model.add(LSTM(16, return_sequences=True, batch_input_shape=(1, None, 1,), stateful=True))
+#     policy_model.add(TimeDistributed(Dense(nb_actions)))
+#     policy_model.add(Activation('linear'))
+#          
+#     model = Sequential()
+#     model.add(LSTM(16, return_sequences=True, batch_input_shape=(batch_size, None, 1,)))
+#     model.add(TimeDistributed(Dense(nb_actions)))
+#     model.add(Activation('linear'))
+#          
+#     memory = EpisodicMemory(limit=100)
+#     policy = EpsGreedyQPolicy(eps=.1)
+#     dqn = DQNAgent(model=model, policy_model=policy_model, nb_actions=nb_actions, memory=memory,
+#                    nb_steps_warmup=50, target_model_update=1e-1, policy=policy, enable_double_dqn=False,
+#                    batch_size=batch_size, train_interval=2)
+#     dqn.compile(Adam(lr=1e-3))
+#         
+#     callbacks = [ResetStatesCallback()]
+#     dqn.fit(env, nb_steps=2000, visualize=False, verbose=0,callbacks=callbacks)
+#     policy.eps = 0.
+#     h = dqn.test(env, nb_episodes=20, visualize=False)
+#     assert_allclose(np.mean(h.history['episode_reward']), 3.)
+    
+
+    print 'Testing DQN on cartpole problem'
+    env = gym.make('CartPole-v0')
     np.random.seed(123)
     env.seed(123)
     random.seed(123)
     nb_actions = env.action_space.n
-    batch_size = 10 #np.random.random_integers(10, 20)
+    batch_size = 10
 
     # Next, we build a very simple model.
     policy_model = Sequential()
-    policy_model.add(LSTM(16, return_sequences=True, stateful=True, batch_input_shape=(1, None, 1,)))
-    policy_model.add(TimeDistributed(Dense(nb_actions)))
+    policy_model.add(LSTM(16, return_sequences=True, batch_input_shape=(1, None,) + env.observation_space.shape, stateful=True))
+    #policy_model.add(LSTM(16, return_sequences=True,))
+    #policy_model.add(TimeDistributed(Dense(nb_actions)))
+    policy_model.add(TimeDistributed(Dense(16)))
+    policy_model.add(Dense(16, activation='relu'))
+    policy_model.add(Dense(nb_actions))
     policy_model.add(Activation('linear'))
-
+    
     model = Sequential()
-    model.add(LSTM(16, return_sequences=True, stateful=True, batch_input_shape=(batch_size, None, 1,)))
-    model.add(TimeDistributed(Dense(nb_actions)))
+    model.add(LSTM(16, return_sequences=True, batch_input_shape=(batch_size, None,) + env.observation_space.shape))
+    #model.add(LSTM(16, return_sequences=True))
+    #model.add(TimeDistributed(Dense(nb_actions)))
+    model.add(TimeDistributed(Dense(16)))
+    model.add(Dense(16, activation='relu'))
+    model.add(Dense(nb_actions))
     model.add(Activation('linear'))
 
-    memory = EpisodicMemory(limit=500, window_length=1)
+    memory = EpisodicMemory(limit=100)
+    #memory = PrioritizedEpisodicMemory(limit=100)
+    #memory = WindowedMemory(limit=10000, window_length=30)
+    
     policy = EpsGreedyQPolicy(eps=.1)
     dqn = DQNAgent(model=model, policy_model=policy_model, nb_actions=nb_actions, memory=memory,
-                   nb_steps_warmup=50, target_model_update=1e-1, policy=policy, enable_double_dqn=False,
-                   batch_size=batch_size)
+                   nb_steps_warmup=1000, target_model_update=1e-1, policy=policy, enable_double_dqn=False,
+                   batch_size=batch_size, train_interval=10)
     dqn.compile(Adam(lr=1e-3))
 
-    dqn.fit(env, nb_steps=2000, visualize=False, verbose=0)
+    callbacks = [ResetStatesCallback()]
+    dqn.fit(env, nb_steps=20000, visualize=False, verbose=2, callbacks=callbacks)
     policy.eps = 0.
-    h = dqn.test(env, nb_episodes=20, visualize=False)
-    assert_allclose(np.mean(h.history['episode_reward']), 3.)
+    h = dqn.test(env, nb_episodes=20, visualize=True)
+    print np.mean(h.history['episode_reward'])
+    assert np.mean(h.history['episode_reward']) > 195.
 
+
+    print 'Testing DQN on multi-mode cartpole problem'
+    env = gym.make('CartPole-v0')
+    np.random.seed(123)
+    env.seed(123)
+    random.seed(123)
+    
+    processor = MultiModeCartpole()
+    memory = EpisodicMemory(limit=200)
+    policy = EpsGreedyQPolicy(eps=.1)
+    dqn = DQNAgent(model=model, policy_model=policy_model, nb_actions=nb_actions, memory=memory,
+                   nb_steps_warmup=1000, target_model_update=1e-1, policy=policy, enable_double_dqn=False,
+                   batch_size=batch_size, processor=processor)
+    dqn.compile(Adam(lr=1e-3))
+
+    dqn.fit(env, nb_steps=20000, visualize=False, verbose=2)
+    policy.eps = 0.
+    h = dqn.test(env, nb_episodes=20, visualize=True)
+    print np.mean(h.history['episode_reward'])
+    assert np.mean(h.history['episode_reward']) > 195.
+    
 
 def test_cem():
     env = TwoRoundDeterministicRewardEnv()
