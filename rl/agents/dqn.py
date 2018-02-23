@@ -8,6 +8,7 @@ from keras.layers import Lambda, Input, Layer, Dense
 from rl.core import Agent
 from rl.policy import EpsGreedyQPolicy, GreedyQPolicy
 from rl.util import *
+from rl.callbacks import ResetStatesCallback
 
 import numpy as np
 np.set_printoptions(threshold=np.nan)
@@ -62,12 +63,14 @@ class AbstractDQNAgent(Agent):
                 while batch.ndim < 3:
                     # discreet inputs must be converted to arrays for recurrent inputs
                     batch = batch.reshape(batch.shape + (1,))
+            #batch = batch.reshape((1,) + batch.shape)
             return batch
         return self.processor.process_state_batch(batch)
 
     def compute_q_values(self, state):
         batch = self.process_state_batch(state)
-        q_values = self.policy_model.predict_on_batch(batch)[0,-1,:]
+        q_values = self.policy_model.predict_on_batch(batch)
+        q_values = q_values.reshape(self.nb_actions)
         return q_values
 
     def get_config(self):
@@ -160,6 +163,15 @@ class DQNAgent(AbstractDQNAgent):
         # State.
         self.reset_states()
 
+    def fit(self, *args, **kwargs):
+        # add reset states on episode start if using stateful policy model
+        if self.policy_model.stateful:
+            callbacks = kwargs.get('callbacks',[])
+            callbacks += [ResetStatesCallback()]
+            kwargs['callbacks'] = callbacks
+        
+        super(DQNAgent, self).fit(*args, **kwargs)
+        
     def get_config(self):
         config = super(DQNAgent, self).get_config()
         config['enable_double_dqn'] = self.enable_double_dqn
@@ -202,7 +214,7 @@ class DQNAgent(AbstractDQNAgent):
         # ever want to update the Q values for a certain action. The way we achieve this is by
         # using a custom Lambda layer that computes the loss. This gives us the necessary flexibility
         # to mask out certain parameters by passing in multiple inputs to the Lambda layer.
-        input_shape = (None, self.nb_actions) if self.is_recurrent else (self.nb_actions,)
+        input_shape = (None, self.nb_actions) if self.is_recurrent else (self.nb_actions,) 
         output_shape = (None, 1) if self.is_recurrent else (1,)
 
         y_pred = self.model.output
@@ -289,6 +301,12 @@ class DQNAgent(AbstractDQNAgent):
             assert len(reward_batch) == self.batch_size
             assert len(terminal1_batch) == self.batch_size
             
+            # reset stateful models
+            if self.model.stateful:
+                self.model.reset_states()
+                self.target_model.reset_states()
+                self.trainable_model.reset_states()
+
             # Compute Q values for mini-batch update.
             if self.enable_double_dqn:
                 # According to the paper "Deep Reinforcement Learning with Double Q-learning"
@@ -331,6 +349,7 @@ class DQNAgent(AbstractDQNAgent):
             else:
                 discounted_reward_batch *= terminal1_batch
             assert discounted_reward_batch.shape == reward_batch.shape
+            
             Rs = reward_batch + discounted_reward_batch
             
             if self.is_recurrent:
@@ -370,9 +389,6 @@ class DQNAgent(AbstractDQNAgent):
 
             #print 'backward pass prep: ', str(time.time() - start_time)
             
-            if self.is_recurrent:
-                self.model.reset_states()
-
             #start_time = time.time()
             metrics = []
             for i, t, m, dt in chunks:

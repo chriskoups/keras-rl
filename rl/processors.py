@@ -96,7 +96,7 @@ class MultiModeCartpole(Processor):
     
     This problem is only solvable with a recurrent netwrok architecture.  
     """
-    def __init__(self, min_action, max_action):
+    def __init__(self):
         self.steps = 0  # total steps in episode
         self.mode = 1   # mode 1: action 1 will push left and action 2 will push right. mode 2: inversed behavior
 
@@ -113,14 +113,14 @@ class MultiModeCartpole(Processor):
         return observation, reward, done, info
         
     def process_observation(self, observation):
-        # remove observations of cart and pole velocities 
+        # remove observations of cart and pole velocities
         observation = observation[[0,2]]
         
         # add action mode for first second of the episode
-        if steps < 50:
-            observation.append(self.mode)
+        if self.steps < 50:
+            observation = np.append(observation, self.mode)
         else:
-            observation.append(0)
+            observation = np.append(observation, 0)
         return np.array(observation)
         
     def process_action(self, action):

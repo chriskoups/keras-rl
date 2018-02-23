@@ -41,7 +41,7 @@ class Agent(object):
         """
         return {}
 
-    def fit(self, env, nb_steps, action_repetition=1, callbacks=None, verbose=1,
+    def fit(self, env, nb_steps, action_repetition=1, callbacks=[], verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
             nb_max_episode_steps=None):
         """Trains the agent on the given environment.
@@ -78,8 +78,6 @@ class Agent(object):
             raise ValueError('action_repetition must be >= 1, is {}'.format(action_repetition))
 
         self.training = True
-
-        callbacks = [] if not callbacks else callbacks[:]
 
         if verbose == 1:
             callbacks += [TrainIntervalLogger(interval=log_interval)]
