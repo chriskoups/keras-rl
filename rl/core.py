@@ -144,7 +144,8 @@ class Agent(object):
                             observation = deepcopy(env.reset())
                             if self.processor is not None:
                                 observation = self.processor.process_observation(observation)
-                            break
+                            assert observation is not None
+                            #break
 
                 # At this point, we expect to be fully initialized.
                 assert episode_reward is not None

@@ -77,13 +77,34 @@ class Memory(object):
             
         batch_idxs = np.array(batch_idxs)
         
+        # check if multiple inputs, if so we have to restructure the batch of observations
+        # todo replace append with set, initialise states_batch with correct size and just assign values
+        if isinstance(self.states[0], (list, tuple)):
+            states_batch = list(self.states[batch_idxs[0]])
+            states1_batch = list(self.states[batch_idxs[0]+1])
+            for idx in batch_idxs[1:]:
+                for n, obs in enumerate(self.states[idx]):
+                    states_batch[n] = np.append(states_batch[n], obs, axis=0)
+                for n, obs in enumerate(self.states[idx+1]):
+                    states1_batch[n] = np.append(states1_batch[n], obs, axis=0)
+            
+            assert len(states_batch[0]) == batch_size
+            assert len(states1_batch[0]) == batch_size
+        else:
+            states_batch = np.array(self.states)[batch_idxs]
+            states1_batch = np.array(self.states)[batch_idxs+1]
+            
+            assert len(states_batch) == batch_size
+            assert len(states1_batch) == batch_size
+            
         experiences = []
         for idx in batch_idxs:
             experiences.append(Experience(state0=self.states[idx], action=self.actions[idx], reward=self.rewards[idx],
                                           state1=self.states[idx+1], terminal1=self.terminals[idx]))
             
         assert len(experiences) == batch_size
-        return experiences, np.array(self.states)[batch_idxs], np.array(self.actions)[batch_idxs], np.array(self.rewards)[batch_idxs], np.array(self.states)[batch_idxs+1], np.array(self.terminals)[batch_idxs]
+
+        return experiences, states_batch, np.array(self.actions)[batch_idxs], np.array(self.rewards)[batch_idxs], states1_batch, np.array(self.terminals)[batch_idxs]
 
     def append(self, observation, action, reward, terminal, training=True):
         if training:
@@ -93,9 +114,10 @@ class Memory(object):
             self.terminals.append(terminal)
 
     def get_recent_state(self, current_observation):
-        state = np.array(current_observation)
+        state = current_observation
         # add batch dimention
-        state = state.reshape((1,) + state.shape)
+        # state = state.reshape((1,) + state.shape)
+
         return state
 
     def get_config(self):

@@ -112,7 +112,7 @@ class DDPGAgent(Agent):
 
         # We also compile the actor. We never optimize the actor using Keras but instead compute
         # the policy gradient ourselves. However, we need the actor in feed-forward mode, hence
-        # we also compile it with any optimzer and
+        # we also compile it with any optimzer and loss.
         self.actor.compile(optimizer='sgd', loss='mse')
 
         # Compile the critic.
@@ -125,14 +125,14 @@ class DDPGAgent(Agent):
         # Combine actor and critic so that we can get the policy gradient.
         # Assuming critic's state inputs are the same as actor's.
         combined_inputs = []
-        critic_inputs = []
+        actor_inputs = []
         for i in self.critic.input:
             if i == self.critic_action_input:
                 combined_inputs.append([])
             else:
                 combined_inputs.append(i)
-                critic_inputs.append(i)
-        combined_inputs[self.critic_action_input_idx] = self.actor(critic_inputs)
+                actor_inputs.append(i)
+        combined_inputs[self.critic_action_input_idx] = self.actor(actor_inputs)
 
         combined_output = self.critic(combined_inputs)
 
@@ -145,12 +145,12 @@ class DDPGAgent(Agent):
 
         # Finally, combine it all into a callable function.
         if K.backend() == 'tensorflow':
-            self.actor_train_fn = K.function(critic_inputs + [K.learning_phase()],
-                                             [self.actor(critic_inputs)], updates=updates)
+            self.actor_train_fn = K.function(actor_inputs + [K.learning_phase()],
+                                             [self.actor(actor_inputs)], updates=updates)
         else:
             if self.uses_learning_phase:
-                critic_inputs += [K.learning_phase()]
-            self.actor_train_fn = K.function(critic_inputs, [self.actor(critic_inputs)], updates=updates)
+                actor_inputs += [K.learning_phase()]
+            self.actor_train_fn = K.function(actor_inputs, [self.actor(actor_inputs)], updates=updates)
         self.actor_optimizer = actor_optimizer
 
         self.compiled = True
@@ -209,12 +209,13 @@ class DDPGAgent(Agent):
         # Select an action.
         state = self.memory.get_recent_state(observation)
         action = self.select_action(state)  # TODO: move this into policy
-        if self.processor is not None:
-            action = self.processor.process_action(action)
-
+        
         # Book-keeping.
         self.recent_observation = observation
         self.recent_action = action
+        
+        if self.processor is not None:
+            action = self.processor.process_action(action)
 
         return action
 
@@ -232,7 +233,6 @@ class DDPGAgent(Agent):
     def backward(self, reward, terminal=False):
         # Store most recent experience in memory.
         if self.step % self.memory_interval == 0:
-            print reward
             self.memory.append(self.recent_observation, self.recent_action, reward, terminal,
                                training=self.training)
 
@@ -264,7 +264,7 @@ class DDPGAgent(Agent):
             if self.step > self.nb_steps_warmup_critic:
                 target_actions = self.target_actor.predict_on_batch(state1_batch)
                 assert target_actions.shape == (self.batch_size, self.nb_actions)
-                if len(self.critic.inputs) >= 3:
+                if isinstance(state1_batch, (list, tuple)):
                     state1_batch_with_action = state1_batch[:]
                 else:
                     state1_batch_with_action = [state1_batch]
@@ -280,7 +280,7 @@ class DDPGAgent(Agent):
                 targets = (reward_batch + discounted_reward_batch).reshape(self.batch_size, 1)
 
                 # Perform a single batch update on the critic network.
-                if len(self.critic.inputs) >= 3:
+                if isinstance(state0_batch, (list, tuple)):
                     state0_batch_with_action = state0_batch[:]
                 else:
                     state0_batch_with_action = [state0_batch]
@@ -292,7 +292,7 @@ class DDPGAgent(Agent):
             # Update actor, if warm up is over.
             if self.step > self.nb_steps_warmup_actor:
                 # TODO: implement metrics for actor
-                if len(self.actor.inputs) >= 2:
+                if isinstance(state0_batch, (list, tuple)):
                     inputs = state0_batch[:]
                 else:
                     inputs = [state0_batch]

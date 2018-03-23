@@ -66,12 +66,17 @@ class ContinuousToDiscreteActions(Processor):
         self.action = None
 
     def process_action(self, action):
+        if type(action) is np.ndarray:
+            action = action[0]
+          
         if self.action is None:
-            self.action = action[0]
+            self.action = action
+        elif abs(action) > abs(self.action):
+            self.action = action
 
         action = round(action)
         if action < self.min:
-            action= self.min
+            action = self.min
         elif action > self.max:
             action = self.max
             
@@ -79,7 +84,7 @@ class ContinuousToDiscreteActions(Processor):
     
     def process_reward(self, reward):
         if self.action < self.min or self.action > self.max:
-            reward -= abs(self.action)  
+            reward -= abs(self.action)
         self.action = None
         return reward
     

@@ -14,7 +14,7 @@ class AnnealedGaussianProcess(RandomProcess):
         self.n_steps = 0
 
         if sigma_min is not None:
-            self.m = -float(sigma - sigma_min) / float(n_steps_annealing)
+            self.m = -(sigma - sigma_min) / float(n_steps_annealing)
             self.c = sigma
             self.sigma_min = sigma_min
         else:
@@ -24,7 +24,7 @@ class AnnealedGaussianProcess(RandomProcess):
 
     @property
     def current_sigma(self):
-        sigma = max(self.sigma_min, self.m * float(self.n_steps) + self.c)
+        sigma = np.maximum(self.sigma_min, self.m * float(self.n_steps) + self.c)
         return sigma
 
 

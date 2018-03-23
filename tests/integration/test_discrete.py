@@ -25,10 +25,8 @@ def test_dqn():
     
     # Next, we build a very simple model.
     model = Sequential()
-    model.add(Dense(16, input_shape=(1,)))
-    model.add(Activation('relu'))
-    model.add(Dense(nb_actions))
-    model.add(Activation('linear'))
+    model.add(Dense(16, input_shape=(1,), activation = 'relu'))
+    model.add(Dense(nb_actions, activation='linear'))
     
     memory = Memory(limit=100)
     policy = EpsGreedyQPolicy(eps=.1)
@@ -268,8 +266,8 @@ def test_recurrent_dqn():
     dqn = DQNAgent(model=model, policy_model=policy_model, nb_actions=nb_actions, memory=memory,
                    nb_steps_warmup=500, target_model_update=1e-1, policy=policy, 
                    enable_double_dqn=False, batch_size=batch_size, train_interval=1,
-                   nb_max_steps_recurrent_unrolling=10, processor=processor)
-    dqn.compile(Adam(lr=1e-3))
+                   nb_max_steps_recurrent_unrolling=20, processor=processor)
+    dqn.compile(Adam(lr=1e-3)) # clipnorm=5.
     
     dqn.fit(env, nb_steps=40000, visualize=True, verbose=2)
     policy.eps = 0.
