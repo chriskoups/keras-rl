@@ -3,41 +3,7 @@ import pytest
 import numpy as np
 from numpy.testing import assert_allclose
 
-from rl.memory import Memory, SequentialMemory, RingBuffer, EpisodicMemory, EpisodeParameterMemory
-
-
-def test_ring_buffer():
-    def assert_elements(b, ref):
-        assert len(b) == len(ref)
-        for idx in range(b.maxlen):
-            if idx >= len(ref):
-                with pytest.raises(KeyError):
-                    b[idx]
-            else:
-                assert b[idx] == ref[idx]
-
-    b = RingBuffer(5)
-
-    # Fill buffer.
-    assert_elements(b, [])
-    b.append(1)
-    assert_elements(b, [1])
-    b.append(2)
-    assert_elements(b, [1, 2])
-    b.append(3)
-    assert_elements(b, [1, 2, 3])
-    b.append(4)
-    assert_elements(b, [1, 2, 3, 4])
-    b.append(5)
-    assert_elements(b, [1, 2, 3, 4, 5])
-
-    # Add couple more items with buffer at limit.
-    b.append(6)
-    assert_elements(b, [2, 3, 4, 5, 6])
-    b.append(7)
-    assert_elements(b, [3, 4, 5, 6, 7])
-    b.append(8)
-    assert_elements(b, [4, 5, 6, 7, 8])
+from rl.memory import Memory, SequentialMemory, EpisodicMemory, EpisodeParameterMemory
 
 
 def test_get_recent_state_with_episode_boundaries():
@@ -127,8 +93,9 @@ def test_training_flag():
 
     for training in (True, False):
         memories = [
+            Memory(2),
             SequentialMemory(3, window_length=2),
-            EpisodicMemory(1, window_length=2),
+            EpisodicMemory(2)
         ]
         for memory in memories:
             state = np.array(memory.get_recent_state(obs0))
@@ -390,11 +357,11 @@ def test_episodic_sampling():
     
 import time
 if __name__ == '__main__':
-    pytest.main([__file__])
-    quit(0)
+    #pytest.main([__file__])
+    #quit(0)
     
-    memory = EpisodicMemory(10, window_length=2, ignore_episode_boundaries=False)
-    obs_size = (3, 4)
+    memory = Memory(4)
+    obs_size = (1)
     actions = range(5)
 
     obs0 = np.random.random(obs_size)
@@ -434,14 +401,18 @@ if __name__ == '__main__':
     
     # memory.append takes the current observation, the reward after taking an action and if
     # the *new* observation is terminal, thus `obs0` and `terminal1` is correct.
-    for i in range(100000):
+    for i in range(1):
         memory.append(obs0, action0, reward0, terminal1)
         memory.append(obs1, action1, reward1, terminal2)
         memory.append(obs2, action2, reward2, terminal3)
         memory.append(obs3, action3, reward3, terminal4)
         memory.append(obs4, action4, reward4, terminal5)
         memory.append(obs5, action5, reward5, terminal6)
+        
+    print obs0, obs1, obs2, obs3, obs4, obs5
+    print memory.sample(4)
     
+    quit(0)
     start_time = time.time()
     for i in range(100000):
         memory.sample(batch_size=2, batch_idxs=[0, 1])

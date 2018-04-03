@@ -123,7 +123,6 @@ class DDPGAgent(Agent):
         self.critic.compile(optimizer=critic_optimizer, loss=clipped_error, metrics=critic_metrics)
 
         # Combine actor and critic so that we can get the policy gradient.
-        # Assuming critic's state inputs are the same as actor's.
         combined_inputs = []
         actor_inputs = []
         for i in self.critic.input:
@@ -131,26 +130,27 @@ class DDPGAgent(Agent):
                 combined_inputs.append([])
             else:
                 combined_inputs.append(i)
-                actor_inputs.append(i)
-        combined_inputs[self.critic_action_input_idx] = self.actor(actor_inputs)
+                
+        for i in self.actor.input:
+            actor_inputs.append(i)
 
+        combined_inputs[self.critic_action_input_idx] = self.actor(actor_inputs)
         combined_output = self.critic(combined_inputs)
 
-        updates = actor_optimizer.get_updates(
-            params=self.actor.trainable_weights, loss=-K.mean(combined_output))
+        actor_updates = actor_optimizer.get_updates(params=self.actor.trainable_weights, loss=-K.mean(combined_output))
         if self.target_model_update < 1.:
             # Include soft target model updates.
-            updates += get_soft_target_model_updates(self.target_actor, self.actor, self.target_model_update)
-        updates += self.actor.updates  # include other updates of the actor, e.g. for BN
+            actor_updates += get_soft_target_model_updates(self.target_actor, self.actor, self.target_model_update)
+        actor_updates += self.actor.updates  # include other updates of the actor, e.g. for BN
 
         # Finally, combine it all into a callable function.
         if K.backend() == 'tensorflow':
             self.actor_train_fn = K.function(actor_inputs + [K.learning_phase()],
-                                             [self.actor(actor_inputs)], updates=updates)
+                                             [self.actor(actor_inputs)], updates=actor_updates)
         else:
             if self.uses_learning_phase:
                 actor_inputs += [K.learning_phase()]
-            self.actor_train_fn = K.function(actor_inputs, [self.actor(actor_inputs)], updates=updates)
+            self.actor_train_fn = K.function(actor_inputs, [self.actor(actor_inputs)], updates=actor_updates)
         self.actor_optimizer = actor_optimizer
 
         self.compiled = True

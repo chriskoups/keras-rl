@@ -63,21 +63,27 @@ def is_recurrent(model):
             return True
     return False
 
-def huber_loss(y_true, y_pred, clip_value):
+def huber_loss(y_true, y_pred, delta_clip=1):
+    """ huber_loss
+    
+    y_true: The ground truth output tensor, same dimensions as 'y_pred'.
+    y_pred: The predicted outputs.
+    clip_value: float, the point where the huber loss function changes from a quadratic to linear.
+    """
     # Huber loss, see https://en.wikipedia.org/wiki/Huber_loss and
     # https://medium.com/@karpathy/yes-you-should-understand-backprop-e2f06eab496b
     # for details.
-    assert clip_value > 0.
+    assert delta_clip > 0.
 
     x = y_true - y_pred
-    if np.isinf(clip_value):
+    if np.isinf(delta_clip):
         # Spacial case for infinity since Tensorflow does have problems
         # if we compare `K.abs(x) < np.inf`.
         return .5 * K.square(x)
 
-    condition = K.abs(x) < clip_value
+    condition = K.abs(x) < delta_clip
     squared_loss = .5 * K.square(x)
-    linear_loss = clip_value * (K.abs(x) - .5 * clip_value)
+    linear_loss = delta_clip * (K.abs(x) - .5 * delta_clip)
     if K.backend() == 'tensorflow':
         import tensorflow as tf
         if hasattr(tf, 'select'):

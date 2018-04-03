@@ -40,7 +40,7 @@ def shape_from_object(object):
     #    return (objectshape_from_object(object[0])
     #    return out.shape()
     else:
-        return ()
+        return np.shape(object)
 
 
 class Memory(object):
@@ -54,8 +54,7 @@ class Memory(object):
         limit: int > 0 Maximum size of the memory buffer
     """
     def __init__(self, limit):
-        if limit < 1:
-            limit = 1
+        assert limit > 0
 
         self.limit = limit
             
@@ -75,8 +74,6 @@ class Memory(object):
         while batch_idxs[idx] > len(self.states) - 1:
             batch_idxs = sample_batch_indexes(0, self.state.size - 1, size=batch_size)
             
-        batch_idxs = np.array(batch_idxs)
-        
         # check if multiple inputs, if so we have to restructure the batch of observations
         # todo replace append with set, initialise states_batch with correct size and just assign values
         if isinstance(self.states[0], (list, tuple)):
@@ -91,20 +88,29 @@ class Memory(object):
             assert len(states_batch[0]) == batch_size
             assert len(states1_batch[0]) == batch_size
         else:
-            states_batch = np.array(self.states)[batch_idxs]
-            states1_batch = np.array(self.states)[batch_idxs+1]
+            states_batch = np.zeros(batch_size)
+            states1_batch = np.zeros(batch_size)
+            for i, idx in enumerate(batch_idxs):
+                states_batch[i] = self.states[idx]
+                states1_batch[i] = self.states[idx+1]
             
             assert len(states_batch) == batch_size
             assert len(states1_batch) == batch_size
             
         experiences = []
-        for idx in batch_idxs:
+        actions = np.zeros((batch_size,) + shape_from_object(self.actions[0]))
+        rewards = np.zeros((batch_size,) + shape_from_object(self.rewards[0]))
+        terminals = np.ones((batch_size,) + shape_from_object(self.terminals[0]), dtype=bool)
+        for i, idx in enumerate(batch_idxs):
             experiences.append(Experience(state0=self.states[idx], action=self.actions[idx], reward=self.rewards[idx],
                                           state1=self.states[idx+1], terminal1=self.terminals[idx]))
+            actions[i] = self.actions[idx]
+            rewards[i] = self.rewards[idx]
+            terminals[i] = self.terminals[idx]
             
         assert len(experiences) == batch_size
 
-        return experiences, states_batch, np.array(self.actions)[batch_idxs], np.array(self.rewards)[batch_idxs], states1_batch, np.array(self.terminals)[batch_idxs]
+        return experiences, states_batch, actions, rewards, states1_batch, terminals
 
     def append(self, observation, action, reward, terminal, training=True):
         if training:
@@ -119,14 +125,24 @@ class Memory(object):
         # state = state.reshape((1,) + state.shape)
 
         return state
-
+    
+    @property
     def get_config(self):
         config = {
             'limit': self.limit,
         }
         return config
+    
+    @property
+    def nb_entries(self):
+        return len(self.terminals)
+    
+    @property
+    def is_episodic(self):
+        return False
 
-
+#class PrioritizedMemory(Memory):
+    
 class WindowedMemory(Memory):
     """ WindowedMemory
     
@@ -245,22 +261,13 @@ class WindowedMemory(Memory):
             self.terminals.append(terminal)
 
     @property
-    def nb_entries(self):
-        return len(self.states)
-
     def get_config(self):
-        config = super(SequentialMemory, self).get_config()
+        config = super(WindowedMemory, self).get_config()
         config = {
             'window_length': self.window_length,
-            'ignore_episode_boundaries': self.ignore_episode_boundaries,
-            'limit': self.limit,
+            'ignore_episode_boundaries': self.ignore_episode_boundaries
         }
         return config
-
-    @property
-    def is_episodic(self):
-        return False
-
 
 class SequentialMemory(WindowedMemory):
     """ SequentialMemory
@@ -344,9 +351,9 @@ class EpisodeParameterMemory(SequentialMemory):
         super(EpisodeParameterMemory, self).__init__(limit)
         self.limit = limit
 
-        self.params = RingBuffer(limit)
+        self.params = deque(limit=limit)
         self.intermediate_rewards = []
-        self.total_rewards = RingBuffer(limit)
+        self.total_rewards = deque(limit=limit)
 
     def sample(self, batch_size, batch_idxs=None):
         if batch_idxs is None:
@@ -375,17 +382,12 @@ class EpisodeParameterMemory(SequentialMemory):
     def nb_entries(self):
         return len(self.total_rewards)
 
-    def get_config(self):
-        config = super(Memory, self).get_config()
-        config['limit'] = self.limit
-        return config
-
     @property
     def is_episodic(self):
         return True
 
 
-class EpisodicMemory(object):
+class EpisodicMemory(Memory):
     def __init__(self, limit):
         self.limit = limit
         self.episodes = deque(maxlen=limit)
@@ -475,14 +477,6 @@ class EpisodicMemory(object):
                 
             self.terminal = terminal
             
-    @property
-    def nb_entries(self):
-        return len(self.episodes)
-
-    def get_config(self):
-        config['limit'] = self.limit
-        return config
-
     @property
     def is_episodic(self):
         return True
