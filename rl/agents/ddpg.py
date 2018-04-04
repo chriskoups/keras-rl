@@ -80,8 +80,6 @@ class DDPGAgent(Agent):
         return self.actor.uses_learning_phase or self.critic.uses_learning_phase
 
     def compile(self, optimizer, metrics=[]):
-        metrics += [mean_q]
-
         if type(optimizer) in (list, tuple):
             if len(optimizer) != 2:
                 raise ValueError('More than two optimizers provided. Please only provide a maximum of two optimizers, the first one for the actor and the second one for the critic.')
@@ -99,6 +97,7 @@ class DDPGAgent(Agent):
             actor_metrics, critic_metrics = metrics
         else:
             actor_metrics = critic_metrics = metrics
+        critic_metrics += [mean_q]
 
         def clipped_error(y_true, y_pred):
             return K.mean(huber_loss(y_true, y_pred, self.delta_clip), axis=-1)
@@ -135,9 +134,9 @@ class DDPGAgent(Agent):
             actor_inputs.append(i)
 
         combined_inputs[self.critic_action_input_idx] = self.actor(actor_inputs)
-        combined_output = self.critic(combined_inputs)
+        critic_output = self.critic(combined_inputs)
 
-        actor_updates = actor_optimizer.get_updates(params=self.actor.trainable_weights, loss=-K.mean(combined_output))
+        actor_updates = actor_optimizer.get_updates(params=self.actor.trainable_weights, loss=-K.mean(critic_output))
         if self.target_model_update < 1.:
             # Include soft target model updates.
             actor_updates += get_soft_target_model_updates(self.target_actor, self.actor, self.target_model_update)

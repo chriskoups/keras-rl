@@ -1,6 +1,6 @@
 import numpy as np
 
-from keras.models import model_from_config, Sequential, Model, model_from_config
+from keras.models import model_from_config, Sequential, Model
 import keras.optimizers as optimizers
 import keras.backend as K
 from keras.layers.recurrent import RNN
@@ -14,6 +14,9 @@ def clone_model(model, custom_objects={}):
     }
     clone = model_from_config(config, custom_objects=custom_objects)
     clone.set_weights(model.get_weights())
+    for cl, ml in zip(clone.layers, model.layers):
+        cl.trainable = ml.trainable
+
     return clone
 
 
