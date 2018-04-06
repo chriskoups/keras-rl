@@ -63,15 +63,15 @@ class ContinuousToDiscreteActions(Processor):
     def __init__(self, min_action, max_action):
         self.min = round(min_action)
         self.max = round(max_action)
-        self.action = None
+        self.max_action = None
 
     def process_action(self, action):
         if type(action) is np.ndarray:
             action = action[0]
-          
-        if self.action is None:
-            self.action = action
-        elif abs(action) > abs(self.action):
+
+        if self.max_action is None:
+            self.max_action = action
+        elif abs(action) > abs(self.max_action):
             self.action = action
 
         action = round(action)
@@ -79,15 +79,33 @@ class ContinuousToDiscreteActions(Processor):
             action = self.min
         elif action > self.max:
             action = self.max
-            
+
         return int(action)
-    
+
     def process_reward(self, reward):
-        if self.action < self.min or self.action > self.max:
-            reward -= abs(self.action)
-        self.action = None
+        if self.max_action is not None:
+            if self.max_action < self.min:
+                reward -= abs(self.max_action - self.min)
+            elif self.max_action > self.max:
+                reward -= abs(self.max_action - self.max)
+
         return reward
-    
+
+    def process_observation(self, observation, reset=True):
+        if reset:
+            self.max_action = None
+        return observation
+
+    def process_step(self, observation, reward, done, info):
+        observation = self.process_observation(observation, False)
+        reward = self.process_reward(reward)
+        info = self.process_info(info)
+
+        if done:
+            self.max_action = None
+
+        return observation, reward, done, info
+
 class MultiModeCartpole(Processor):
     """Augment classical cartpole problem to reduce the observability of the state.
     

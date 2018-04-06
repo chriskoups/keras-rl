@@ -79,6 +79,9 @@ class Agent(object):
 
         self.training = True
 
+        if nb_steps < log_interval:
+            log_interval = nb_steps
+
         if verbose == 1:
             callbacks += [TrainIntervalLogger(interval=log_interval)]
         elif verbose > 1:
@@ -113,8 +116,8 @@ class Agent(object):
             while self.step < nb_steps:
                 if observation is None:  # start of a new episode
                     callbacks.on_episode_begin(episode)
-                    episode_step = 0
                     episode_reward = 0.
+                    episode_step = 0
 
                     # Obtain the initial observation by resetting the environment.
                     self.reset_states()
@@ -144,8 +147,7 @@ class Agent(object):
                             observation = deepcopy(env.reset())
                             if self.processor is not None:
                                 observation = self.processor.process_observation(observation)
-                            assert observation is not None
-                            #break
+                            break
 
                 # At this point, we expect to be fully initialized.
                 assert episode_reward is not None
@@ -168,14 +170,14 @@ class Agent(object):
                     observation = deepcopy(observation)
                     if self.processor is not None:
                         observation, r, done, info = self.processor.process_step(observation, r, done, info)
+                    callbacks.on_action_end(action)
+                    reward += r
                     for key, value in info.items():
                         if not np.isreal(value):
                             continue
                         if key not in accumulated_info:
                             accumulated_info[key] = np.zeros_like(value)
                         accumulated_info[key] += value
-                    callbacks.on_action_end(action)
-                    reward += r
                     if done:
                         break
                 if nb_max_episode_steps and episode_step >= nb_max_episode_steps - 1:

@@ -6,6 +6,7 @@ import warnings
 import numpy as np
 import keras.backend as K
 import keras.optimizers as optimizers
+import keras.models as models
 
 from rl.core import Agent
 from rl.random import OrnsteinUhlenbeckProcess
@@ -129,9 +130,15 @@ class DDPGAgent(Agent):
                 combined_inputs.append([])
             else:
                 combined_inputs.append(i)
-                
-        for i in self.actor.input:
-            actor_inputs.append(i)
+
+        if type(self.actor) is models.Sequential:
+            # assume inputs are the same for actor and critic
+            for i in self.critic.input:
+                if i != self.critic_action_input:
+                    actor_inputs.append(i)
+        else:
+            for i in self.actor.input:
+                actor_inputs.append(i)
 
         combined_inputs[self.critic_action_input_idx] = self.actor(actor_inputs)
         critic_output = self.critic(combined_inputs)
@@ -150,7 +157,6 @@ class DDPGAgent(Agent):
             if self.uses_learning_phase:
                 actor_inputs += [K.learning_phase()]
             self.actor_train_fn = K.function(actor_inputs, [self.actor(actor_inputs)], updates=actor_updates)
-        self.actor_optimizer = actor_optimizer
 
         self.compiled = True
 
