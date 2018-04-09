@@ -143,12 +143,16 @@ class TrainEpisodeLogger(Callback):
                 if idx > 0:
                     metrics_template += ', '
                 try:
-                    value = np.nanmean(metrics[:, idx])
-                    metrics_template += '{}: {:f}'
+                    mean = np.nanmean(metrics[:, idx])
+                    min = np.min(metrics[:, idx])
+                    max = np.max(metrics[:, idx])
+                    metrics_template += '{}: {:f} [{:f}, {:f}]'
                 except Warning:
-                    value = '--'
+                    mean = '--'
+                    min = '--'
+                    max = '--'
                     metrics_template += '{}: {}'
-                metrics_variables += [name, value]          
+                metrics_variables += [name, mean, min, max]
         metrics_text = metrics_template.format(*metrics_variables)
 
         nb_step_digits = str(int(np.ceil(np.log10(self.params['nb_steps']))) + 1)
@@ -253,9 +257,21 @@ class TrainIntervalLogger(Callback):
 
 
 class FileLogger(Callback):
-    def __init__(self, filepath, interval=None):
+    def __init__(self, filepath, interval=None, verbose=0):
+        """ 
+        Log training statistics to a file
+        
+        Keyword arguments:
+        filepath -- Path to desired log file
+        interval -- If specified, will result in a log file being made at $interval episodes (default: None)
+        verbose -- Defines the level of detail of each logged metric (default: 0)
+                   0 results in only mean values logged
+                   1 results in min, max, mean, median, 25 and 75 percetiles logged
+                   2 will log all data
+        """
         self.filepath = filepath
         self.interval = interval
+        self.verbose = verbose
 
         # Some algorithms compute multiple episodes at once since they are multi-threaded.
         # We therefore use a dict that maps from episode to metrics array.
@@ -265,6 +281,12 @@ class FileLogger(Callback):
 
     def on_train_begin(self, logs):
         self.metrics_names = self.model.metrics_names
+        if self.verbose == 1:
+            self.metrics_names_min = ['{}_min'.format(n) for n in self.metrics_names]
+            self.metrics_names_max = ['{}_max'.format(n) for n in self.metrics_names]
+            self.metrics_names_median = ['{}_median'.format(n) for n in self.metrics_names]
+            self.metrics_names_25 = ['{}_25'.format(n) for n in self.metrics_names]
+            self.metrics_names_75 = ['{}_75'.format(n) for n in self.metrics_names]
 
     def on_train_end(self, logs):
         self.save_data()
@@ -280,12 +302,30 @@ class FileLogger(Callback):
         
         metrics = self.metrics[episode]
         if np.isnan(metrics).all():
-            mean_metrics = np.array([np.nan for _ in self.metrics_names])
+            metrics_mean   = np.array([np.nan for _ in self.metrics_names])
+            if self.verbose == 1:
+                metrics_min     = np.array([np.nan for _ in self.metrics_names])
+                metrics_max     = np.array([np.nan for _ in self.metrics_names])
+                metrics_median  = np.array([np.nan for _ in self.metrics_names])
+                metrics_25      = np.array([np.nan for _ in self.metrics_names])
+                metrics_75      = np.array([np.nan for _ in self.metrics_names])
         else:
-            mean_metrics = np.nanmean(metrics, axis=0)
+            metrics_mean   = np.nanmean(metrics, axis=0)
+            if self.verbose == 1:
+                metrics_min    = np.nanmin(metrics, axis=0)
+                metrics_max    = np.nanmax(metrics, axis=0)
+                metrics_median = np.nanmedian(metrics, axis=0)
+                metrics_25      = np.nanpercentile(metrics, 25, axis=0)
+                metrics_75      = np.nanpercentile(metrics, 75, axis=0)
         assert len(mean_metrics) == len(self.metrics_names)
 
-        data = list(zip(self.metrics_names, mean_metrics))
+        data = list(zip(self.metrics_names, metrics_mean))
+        if self.verbose == 1:
+            data += list(zip(self.metrics_names_min, metrics_min))
+            data += list(zip(self.metrics_names_max, metrics_max))
+            data += list(zip(self.metrics_names_median, metrics_median))
+            data += list(zip(self.metrics_names_25, metrics_25))
+            data += list(zip(self.metrics_names_75, metrics_75))
         data += list(logs.items())
         data += [('episode', episode), ('duration', duration)]
         for key, value in data:

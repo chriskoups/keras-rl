@@ -121,7 +121,7 @@ def test_ddpg():
 
     memory = SequentialMemory(limit=2500)
     sigma = np.abs((env.action_space.high - env.action_space.low)) / 2.
-    random_process = OrnsteinUhlenbeckProcess(0.15, mu=0., sigma=sigma, sigma_min=sigma*0.1, n_steps_annealing=10000, seed=123)
+    random_process = GaussianWhiteNoiseProcess(mu=0., sigma=sigma, sigma_min=sigma*0.1, n_steps_annealing=10000, seed=123)
     agent = DDPGAgent(nb_actions=nb_actions, actor=actor, critic=critic, critic_action_input=action_input,
                       memory=memory, nb_steps_warmup_critic=32, nb_steps_warmup_actor=32,
                       random_process=random_process, gamma=.95, target_model_update=1e-2)
