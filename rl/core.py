@@ -43,7 +43,7 @@ class Agent(object):
 
     def fit(self, env, nb_steps, action_repetition=1, callbacks=[], verbose=1,
             visualize=False, nb_max_start_steps=0, start_step_policy=None, log_interval=10000,
-            nb_max_episode_steps=None, training_repetition=None):
+            nb_max_episode_steps=None, training_repetition=1):
         """Trains the agent on the given environment.
 
         # Arguments
@@ -183,9 +183,8 @@ class Agent(object):
                 if nb_max_episode_steps and episode_step >= nb_max_episode_steps - 1:
                     # Force a terminal state.
                     done = True
-                if training_repetition is not None:
-                    for _ in range(0,training_repetition)
-                        metrics = self.backward(reward, terminal=done)
+                for _ in range(0, training_repetition):
+                    metrics = self.backward(reward, terminal=done)
                 episode_reward += reward
 
                 step_logs = {
