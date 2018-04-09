@@ -144,8 +144,8 @@ class TrainEpisodeLogger(Callback):
                     metrics_template += ', '
                 try:
                     mean = np.nanmean(metrics[:, idx])
-                    min = np.min(metrics[:, idx])
-                    max = np.max(metrics[:, idx])
+                    min = np.nanmin(metrics[:, idx])
+                    max = np.nanmax(metrics[:, idx])
                     metrics_template += '{}: {:f} [{:f}, {:f}]'
                 except Warning:
                     mean = '--'
@@ -317,7 +317,7 @@ class FileLogger(Callback):
                 metrics_median = np.nanmedian(metrics, axis=0)
                 metrics_25      = np.nanpercentile(metrics, 25, axis=0)
                 metrics_75      = np.nanpercentile(metrics, 75, axis=0)
-        assert len(mean_metrics) == len(self.metrics_names)
+        assert len(metrics_mean) == len(self.metrics_names)
 
         data = list(zip(self.metrics_names, metrics_mean))
         if self.verbose == 1:
