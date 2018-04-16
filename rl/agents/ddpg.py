@@ -2,6 +2,7 @@ from __future__ import division
 from collections import deque
 import os
 import warnings
+import time as time
 
 import numpy as np
 import keras.backend as K
@@ -12,10 +13,10 @@ from rl.core import Agent
 from rl.random import OrnsteinUhlenbeckProcess
 from rl.util import *
 
-
 def mean_q(y_true, y_pred):
     return K.mean(K.max(y_pred, axis=-1))
 
+debug = False
 
 # Deep DPG as described by Lillicrap et al. (2015)
 # http://arxiv.org/pdf/1509.02971v2.pdf
@@ -214,11 +215,11 @@ class DDPGAgent(Agent):
         # Select an action.
         state = self.memory.get_recent_state(observation)
         action = self.select_action(state)  # TODO: move this into policy
-        
+
         # Book-keeping.
         self.recent_observation = observation
         self.recent_action = action
-        
+
         if self.processor is not None:
             action = self.processor.process_action(action)
 
@@ -237,9 +238,12 @@ class DDPGAgent(Agent):
 
     def backward(self, reward, terminal=False):
         # Store most recent experience in memory.
+        start_time = time.time()
         if self.step % self.memory_interval == 0:
             self.memory.append(self.recent_observation, self.recent_action, reward, terminal,
                                training=self.training)
+        if debug:
+            print "write memory time: " + str(time.time() - start_time) + " s"
 
         metrics = [np.nan for _ in self.metrics_names]
         if not self.training:
@@ -250,14 +254,19 @@ class DDPGAgent(Agent):
         # Train the network on a single stochastic batch.
         can_train_either = self.step > self.nb_steps_warmup_critic or self.step > self.nb_steps_warmup_actor
         if can_train_either and self.step % self.train_interval == 0:
-            experiences, state0_batch, action_batch, reward_batch, state1_batch, terminal1_batch = self.memory.sample(self.batch_size)
-            assert len(experiences) == self.batch_size
+            start_time = time.time()
+            #experiences,
+            state0_batch, action_batch, reward_batch, state1_batch, terminal1_batch = self.memory.sample(self.batch_size)
+            if debug:
+                print "read memory time: " + str(time.time() - start_time) + " s"
+
+            #assert len(experiences) == self.batch_size
 
             # Prepare and validate parameters.
             state0_batch = self.process_state_batch(state0_batch)
             state1_batch = self.process_state_batch(state1_batch)
             terminal1_batch = np.invert(terminal1_batch)  # invert terminal for later
-            
+
             assert len(action_batch) == self.batch_size
             assert len(reward_batch) == self.batch_size
             assert len(terminal1_batch) == self.batch_size
@@ -290,7 +299,12 @@ class DDPGAgent(Agent):
                 else:
                     state0_batch_with_action = [state0_batch]
                 state0_batch_with_action.insert(self.critic_action_input_idx, action_batch)
+
+                start_time = time.time()
                 metrics = self.critic.train_on_batch(state0_batch_with_action, targets)
+                if debug:
+                    print "train value function time: " + str(time.time() - start_time) + " s"
+
                 if self.processor is not None:
                     metrics += self.processor.metrics
 
@@ -303,7 +317,12 @@ class DDPGAgent(Agent):
                     inputs = [state0_batch]
                 if self.uses_learning_phase:
                     inputs += [self.training]
+
+                start_time = time.time()
                 action_values = self.actor_train_fn(inputs)[0]
+                if debug:
+                    print "train action time: " + str(time.time() - start_time) + " s"
+
                 assert action_values.shape == (self.batch_size, self.nb_actions)
 
         if self.target_model_update >= 1 and self.step % self.target_model_update == 0:
