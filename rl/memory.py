@@ -87,8 +87,8 @@ class Memory(object):
             assert len(states_batch[0]) == batch_size
             assert len(states1_batch[0]) == batch_size
         else:
-            states_batch = np.zeros(batch_size)
-            states1_batch = np.zeros(batch_size)
+            states_batch = np.zeros((batch_size,) + shape_from_object(self.states[0]))
+            states1_batch = np.zeros((batch_size,) + shape_from_object(self.states[0]))
             for i, idx in enumerate(batch_idxs):
                 states_batch[i] = self.states[idx]
                 states1_batch[i] = self.states[idx+1]
@@ -108,7 +108,6 @@ class Memory(object):
             terminals[i] = self.terminals[idx]
 
         #assert len(experiences) == batch_size
-
         #return experiences, states_batch, actions, rewards, states1_batch, terminals
         return states_batch, actions, rewards, states1_batch, terminals
 
@@ -144,7 +143,30 @@ class Memory(object):
     def is_episodic(self):
         return False
 
-#class PrioritizedMemory(Memory):
+class PrioritizedMemory(Memory):
+    def append(self, observation, action, reward, terminal, training=True):
+        def delete_nth(d, n):
+            d.rotate(-n)
+            d.popleft()
+            d.rotate(n)
+
+        if training:
+            if len(self.rewards) == self.limit:
+                rewards = np.array(self.rewards)
+                to_sort = np.stack((xrange(self.limit), np.abs(rewards - np.mean(rewards))), axis=-1)
+                sorted_rewards = sorted(to_sort, key=lambda to_sort: to_sort[1])
+
+                # remove worst element
+                delete_nth(self.states, int(sorted_rewards[0][0]))
+                delete_nth(self.actions, int(sorted_rewards[0][0]))
+                delete_nth(self.rewards, int(sorted_rewards[0][0]))
+                delete_nth(self.terminals, int(sorted_rewards[0][0]))
+
+            else:
+                self.states.append(observation)
+                self.actions.append(action)
+                self.rewards.append(reward)
+                self.terminals.append(terminal)
 
 class WindowedMemory(Memory):
     """ WindowedMemory
@@ -219,7 +241,7 @@ class WindowedMemory(Memory):
         state1_batch = np.zeros((batch_size, self.window_length,) + shape_from_object(self.states[0]))
         terminal_batch = np.zeros((batch_size, self.window_length), dtype=bool)
 
-        experiences = []
+        #experiences = []
         batch = 0
         for idx in batch_idxs:
             state0 = np.zeros((self.window_length,) + shape_from_object(self.states[0]))
@@ -242,11 +264,11 @@ class WindowedMemory(Memory):
 
             state1_batch[batch] = state1
 
-            experiences.append(Experience(state0=state0, action=self.actions[idx], reward=self.rewards[idx],
-                                          state1=state1, terminal1=self.terminals[idx]))
+            #experiences.append(Experience(state0=state0, action=self.actions[idx], reward=self.rewards[idx],
+            #                              state1=state1, terminal1=self.terminals[idx]))
             batch = batch + 1
-        assert len(experiences) == batch_size
-        return experiences, state0_batch, action_batch, reward_batch, state1_batch, terminal_batch
+        #assert len(experiences) == batch_size
+        return state0_batch, action_batch, reward_batch, state1_batch, terminal_batch
 
     def append(self, observation, action, reward, terminal, training=True):
         if self.recent_states == None:
@@ -316,7 +338,7 @@ class SequentialMemory(WindowedMemory):
         state1_batch = np.zeros((batch_size, self.window_length,) + shape_from_object(self.states[0]))
         terminal_batch = np.zeros((batch_size,), dtype=bool)
 
-        experiences = []
+        #experiences = []
         batch = 0
         for idx in batch_idxs:
             state0 = np.zeros((self.window_length,) + shape_from_object(self.states[0]))
@@ -342,11 +364,11 @@ class SequentialMemory(WindowedMemory):
             state1_batch[batch] = state1
             terminal_batch[batch] = self.terminals[idx]
 
-            experiences.append(Experience(state0=state0, action=self.actions[idx], reward=self.rewards[idx],
-                                          state1=state1, terminal1=self.terminals[idx]))
+            #experiences.append(Experience(state0=state0, action=self.actions[idx], reward=self.rewards[idx],
+            #                              state1=state1, terminal1=self.terminals[idx]))
             batch = batch + 1
-        assert len(experiences) == batch_size
-        return experiences, state0_batch, action_batch, reward_batch, state1_batch, terminal_batch
+        #assert len(experiences) == batch_size
+        return state0_batch, action_batch, reward_batch, state1_batch, terminal_batch
 
 
 class EpisodeParameterMemory(SequentialMemory):

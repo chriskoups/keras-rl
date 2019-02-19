@@ -137,9 +137,11 @@ class DDPGAgent(Agent):
             for i in self.critic.input:
                 if i != self.critic_action_input:
                     actor_inputs.append(i)
-        else:
+        elif isinstance(self.actor.input, (list, tuple)):
             for i in self.actor.input:
                 actor_inputs.append(i)
+        else:
+            actor_inputs.append(i)
 
         combined_inputs[self.critic_action_input_idx] = self.actor(actor_inputs)
         critic_output = self.critic(combined_inputs)
