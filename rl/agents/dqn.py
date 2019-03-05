@@ -268,7 +268,7 @@ class DQNAgent(AbstractDQNAgent):
         batch = self.process_state_batch([state])
         if self.is_recurrent:
             # Add time axis.
-            batch = batch.reshape((1,) + batch.shape)  # (1, 1, ...)
+        batch = batch.reshape((1,) + batch.shape)  # (1, 1, ...)
         q_values = self.policy_model.predict_on_batch(batch).flatten()
         assert q_values.shape == (self.nb_actions,)
         return q_values
