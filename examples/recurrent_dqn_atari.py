@@ -78,7 +78,7 @@ def build_model(stateful, batch_size=None):
     if K.image_dim_ordering() == 'tf':
         # (width, height, channels)
         if stateful:
-            model.add(Permute((2, 3, 4, 5), batch_input_shape=input_shape))
+            model.add(Permute((1, 2, 3, 4), batch_input_shape=input_shape))
         else:
             model.add(Permute((1, 3, 4, 2), input_shape=input_shape))
     elif K.image_dim_ordering() == 'th':
