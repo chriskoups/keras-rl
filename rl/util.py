@@ -1,6 +1,8 @@
+import numpy as np
+
 from keras.models import model_from_config, Sequential, Model, model_from_config
 import keras.optimizers as optimizers
-from keras.optimizers import optimizer_from_config, get
+import keras.backend as K
 from keras.layers import Recurrent
 
 
@@ -17,14 +19,18 @@ def clone_model(model, custom_objects={}):
 
 def clone_optimizer(optimizer):
     if type(optimizer) is str:
-        return get(optimizer)
+        return optimizers.get(optimizer)
     # Requires Keras 1.0.7 since get_config has breaking changes.
     params = dict([(k, v) for k, v in optimizer.get_config().items()])
     config = {
         'class_name': optimizer.__class__.__name__,
         'config': params,
     }
-    clone = optimizer_from_config(config)
+    if hasattr(optimizers, 'optimizer_from_config'):
+        # COMPATIBILITY: Keras < 2.0
+        clone = optimizers.optimizer_from_config(config)
+    else:
+        clone = optimizers.deserialize(config)
     return clone
 
 
@@ -41,6 +47,9 @@ def get_soft_target_model_updates(target, source, tau):
 
 
 def get_object_config(o):
+    if o is None:
+        return None
+
     config = {
         'class_name': o.__class__.__name__,
         'config': o.get_config()
@@ -54,6 +63,33 @@ def is_recurrent(model):
             return True
     return False
 
+def huber_loss(y_true, y_pred, clip_value):
+    # Huber loss, see https://en.wikipedia.org/wiki/Huber_loss and
+    # https://medium.com/@karpathy/yes-you-should-understand-backprop-e2f06eab496b
+    # for details.
+    assert clip_value > 0.
+
+    x = y_true - y_pred
+    if np.isinf(clip_value):
+        # Spacial case for infinity since Tensorflow does have problems
+        # if we compare `K.abs(x) < np.inf`.
+        return .5 * K.square(x)
+
+    condition = K.abs(x) < clip_value
+    squared_loss = .5 * K.square(x)
+    linear_loss = clip_value * (K.abs(x) - .5 * clip_value)
+    if K.backend() == 'tensorflow':
+        import tensorflow as tf
+        if hasattr(tf, 'select'):
+            return tf.select(condition, squared_loss, linear_loss)  # condition, true, false
+        else:
+            return tf.where(condition, squared_loss, linear_loss)  # condition, true, false
+    elif K.backend() == 'theano':
+        from theano import tensor as T
+        return T.switch(condition, squared_loss, linear_loss)
+    else:
+        raise RuntimeError('Unknown backend "{}".'.format(K.backend()))
+
 
 class AdditionalUpdatesOptimizer(optimizers.Optimizer):
     def __init__(self, optimizer, additional_updates):
@@ -62,10 +98,43 @@ class AdditionalUpdatesOptimizer(optimizers.Optimizer):
         self.additional_updates = additional_updates
 
     def get_updates(self, params, constraints, loss):
-        updates = self.optimizer.get_updates(params, constraints, loss)
+        updates = self.optimizer.get_updates(params=params, constraints, loss=loss)
         updates += self.additional_updates
         self.updates = updates
         return self.updates
 
     def get_config(self):
         return self.optimizer.get_config()
+
+
+# Based on https://github.com/openai/baselines/blob/master/baselines/common/mpi_running_mean_std.py
+class WhiteningNormalizer(object):
+    def __init__(self, shape, eps=1e-2, dtype=np.float64):
+        self.eps = eps
+        self.shape = shape
+        self.dtype = dtype
+
+        self._sum = np.zeros(shape, dtype=dtype)
+        self._sumsq = np.zeros(shape, dtype=dtype)
+        self._count = 0
+
+        self.mean = np.zeros(shape, dtype=dtype)
+        self.std = np.ones(shape, dtype=dtype)
+
+    def normalize(self, x):
+        return (x - self.mean) / self.std
+
+    def denormalize(self, x):
+        return self.std * x + self.mean
+
+    def update(self, x):
+        if x.ndim == len(self.shape):
+            x = x.reshape(-1, *self.shape)
+        assert x.shape[1:] == self.shape
+
+        self._count += x.shape[0]
+        self._sum += np.sum(x, axis=0)
+        self._sumsq += np.sum(np.square(x), axis=0)
+
+        self.mean = self._sum / float(self._count)
+        self.std = np.sqrt(np.maximum(np.square(self.eps), self._sumsq / float(self._count) - np.square(self.mean)))
