@@ -278,10 +278,10 @@ class DQNAgent(AbstractDQNAgent):
         state = self.memory.get_recent_state(observation)
         q_values = self.compute_q_values(state)
         action = self.policy.select_action(q_values=q_values)
-            if self.training:
-                action = self.policy.select_action(q_values=q_values)
-            else:
-                action = self.test_policy.select_action(q_values=q_values)
+        if self.training:
+            action = self.policy.select_action(q_values=q_values)
+        else:
+            action = self.test_policy.select_action(q_values=q_values)
 
         # if self.processor is not None:
         #     action = self.processor.process_action(action)
