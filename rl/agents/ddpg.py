@@ -1,6 +1,8 @@
 from __future__ import division
 from collections import deque
 import os
+import warnings
+
 
 import numpy as np
 import keras.backend as K
@@ -19,9 +21,11 @@ def mean_q(y_true, y_pred):
 # http://arxiv.org/pdf/1509.02971v2.pdf
 # http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.646.4324&rep=rep1&type=pdf
 class DDPGAgent(Agent):
+    """Write me
+    """
     def __init__(self, nb_actions, actor, critic, critic_action_input, memory,
                  gamma=.99, batch_size=32, nb_steps_warmup_critic=1000, nb_steps_warmup_actor=1000,
-                 train_interval=1, memory_interval=1, delta_range=(-np.inf, np.inf),
+                 train_interval=1, memory_interval=1, delta_range=None, delta_clip=np.inf,
                  random_process=None, custom_model_objects={}, target_model_update=.001, **kwargs):
         if hasattr(actor.output, '__len__') and len(actor.output) > 1:
             raise ValueError('Actor "{}" has more than one output. DDPG expects an actor that has a single output.'.format(actor))
@@ -44,12 +48,16 @@ class DDPGAgent(Agent):
             # Soft update with `(1 - target_model_update) * old + target_model_update * new`.
             target_model_update = float(target_model_update)
 
+        if delta_range is not None:
+            warnings.warn('`delta_range` is deprecated. Please use `delta_clip` instead, which takes a single scalar. For now we\'re falling back to `delta_range[1] = {}`'.format(delta_range[1]))
+            delta_clip = delta_range[1]
+
         # Parameters.
         self.nb_actions = nb_actions
         self.nb_steps_warmup_actor = nb_steps_warmup_actor
         self.nb_steps_warmup_critic = nb_steps_warmup_critic
         self.random_process = random_process
-        self.delta_range = delta_range
+        self.delta_clip = delta_clip
         self.gamma = gamma
         self.target_model_update = target_model_update
         self.batch_size = batch_size
@@ -93,9 +101,11 @@ class DDPGAgent(Agent):
         else:
             actor_metrics = critic_metrics = metrics
 
-        def clipped_mse(y_true, y_pred):
-            delta = K.clip(y_true - y_pred, self.delta_range[0], self.delta_range[1])
-            return K.mean(K.square(delta), axis=-1)
+        # def clipped_mse(y_true, y_pred):
+        #     delta = K.clip(y_true - y_pred, self.delta_range[0], self.delta_range[1])
+        #     return K.mean(K.square(delta), axis=-1)
+        def clipped_error(y_true, y_pred):
+            return K.mean(huber_loss(y_true, y_pred, self.delta_clip), axis=-1)
 
         # Compile target networks. We only use them in feed-forward mode, hence we can pass any
         # optimizer and loss since we never use it anyway.
@@ -114,17 +124,20 @@ class DDPGAgent(Agent):
             # We use the `AdditionalUpdatesOptimizer` to efficiently soft-update the target model.
             critic_updates = get_soft_target_model_updates(self.target_critic, self.critic, self.target_model_update)
             critic_optimizer = AdditionalUpdatesOptimizer(critic_optimizer, critic_updates)
-        self.critic.compile(optimizer=critic_optimizer, loss=clipped_mse, metrics=critic_metrics)
+        self.critic.compile(optimizer=critic_optimizer, loss=clipped_error, metrics=critic_metrics)
 
         # Combine actor and critic so that we can get the policy gradient.
+        # Assuming critic's state inputs are the same as actor's.
         combined_inputs = []
-        critic_inputs = []
+        state_inputs = []
         for i in self.critic.input:
             if i == self.critic_action_input:
-                combined_inputs.append(self.actor.output)
+                combined_inputs.append([]) #self.actor.output)
             else:
                 combined_inputs.append(i)
-                critic_inputs.append(i)
+                state_inputs.append(i)
+        combined_inputs[self.critic_action_input_idx] = self.actor(state_inputs)
+
         combined_output = self.critic(combined_inputs)
         if K._BACKEND == 'tensorflow':
             grads = K.gradients(combined_output, self.actor.trainable_weights)
@@ -135,12 +148,12 @@ class DDPGAgent(Agent):
             grads = [K.mean(g, axis=0) for g in grads]
         else:
             raise RuntimeError('Unknown Keras backend "{}".'.format(K._BACKEND))
-        
+
         # We now have the gradients (`grads`) of the combined model wrt to the actor's weights and
         # the output (`output`). Compute the necessary updates using a clone of the actor's optimizer.
         clipnorm = getattr(actor_optimizer, 'clipnorm', 0.)
         clipvalue = getattr(actor_optimizer, 'clipvalue', 0.)
-        
+
         def get_gradients(loss, params):
             # We want to follow the gradient, but the optimizer goes in the opposite direction to
             # minimize loss. Hence the double inversion.
@@ -152,19 +165,23 @@ class DDPGAgent(Agent):
             if clipvalue > 0.:
                 modified_grads = [K.clip(g, -clipvalue, clipvalue) for g in modified_grads]
             return modified_grads
-        
+
         actor_optimizer.get_gradients = get_gradients
-        updates = actor_optimizer.get_updates(self.actor.trainable_weights, self.actor.constraints, None)
+        updates = actor_optimizer.get_updates(
+            params=self.actor.trainable_weights, self.actor.constraints, loss=-K.mean(combined_output)) #None)
         if self.target_model_update < 1.:
             # Include soft target model updates.
             updates += get_soft_target_model_updates(self.target_actor, self.actor, self.target_model_update)
         updates += self.actor.updates  # include other updates of the actor, e.g. for BN
 
         # Finally, combine it all into a callable function.
-        inputs = self.actor.inputs[:] + critic_inputs
-        if self.uses_learning_phase:
-            inputs += [K.learning_phase()]
-        self.actor_train_fn = K.function(inputs, [self.actor.output], updates=updates)
+        if K.backend() == 'tensorflow':
+            self.actor_train_fn = K.function(state_inputs + [K.learning_phase()],
+                                             [self.actor(state_inputs)], updates=updates)
+        else:
+            if self.uses_learning_phase:
+                state_inputs += [K.learning_phase()]
+            self.actor_train_fn = K.function(state_inputs, [self.actor(state_inputs)], updates=updates)
         self.actor_optimizer = actor_optimizer
 
         self.compiled = True
@@ -224,14 +241,18 @@ class DDPGAgent(Agent):
         # Select an action.
         state = self.memory.get_recent_state(observation)
         action = self.select_action(state)  # TODO: move this into policy
-        if self.processor is not None:
-            action = self.processor.process_action(action)
-        
+        # if self.processor is not None:
+        #     action = self.processor.process_action(action)
+        #
         # Book-keeping.
         self.recent_observation = observation
         self.recent_action = action
-        
+
         return action
+
+    @property
+    def layers(self):
+        return self.actor.layers[:] + self.critic.layers[:]
 
     @property
     def metrics_names(self):
@@ -251,13 +272,13 @@ class DDPGAgent(Agent):
             # We're done here. No need to update the experience memory since we only use the working
             # memory to obtain the state over the most recent observations.
             return metrics
-        
+
         # Train the network on a single stochastic batch.
         can_train_either = self.step > self.nb_steps_warmup_critic or self.step > self.nb_steps_warmup_actor
         if can_train_either and self.step % self.train_interval == 0:
             experiences = self.memory.sample(self.batch_size)
             assert len(experiences) == self.batch_size
-            
+
             # Start by extracting the necessary parameters (we use a vectorized implementation).
             state0_batch = []
             reward_batch = []
@@ -292,14 +313,14 @@ class DDPGAgent(Agent):
                 state1_batch_with_action.insert(self.critic_action_input_idx, target_actions)
                 target_q_values = self.target_critic.predict_on_batch(state1_batch_with_action).flatten()
                 assert target_q_values.shape == (self.batch_size,)
-                
+
                 # Compute r_t + gamma * max_a Q(s_t+1, a) and update the target ys accordingly,
                 # but only for the affected output units (as given by action_batch).
                 discounted_reward_batch = self.gamma * target_q_values
                 discounted_reward_batch *= terminal1_batch
                 assert discounted_reward_batch.shape == reward_batch.shape
                 targets = (reward_batch + discounted_reward_batch).reshape(self.batch_size, 1)
-                
+
                 # Perform a single batch update on the critic network.
                 if len(self.critic.inputs) >= 3:
                     state0_batch_with_action = state0_batch[:]
@@ -314,9 +335,9 @@ class DDPGAgent(Agent):
             if self.step > self.nb_steps_warmup_actor:
                 # TODO: implement metrics for actor
                 if len(self.actor.inputs) >= 2:
-                    inputs = state0_batch[:] + state0_batch[:]
+                    inputs = state0_batch[:]# + state0_batch[:]
                 else:
-                    inputs = [state0_batch, + state0_batch]
+                    inputs = [state0_batch]#, + state0_batch]
                 if self.uses_learning_phase:
                     inputs += [self.training]
                 action_values = self.actor_train_fn(inputs)[0]
