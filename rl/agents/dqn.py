@@ -266,7 +266,7 @@ class DQNAgent(AbstractDQNAgent):
 
     def compute_q_values(self, state):
         batch = self.process_state_batch([state])
-        if self.is_recurrent:
+        #if self.is_recurrent:
             # Add time axis.
         batch = batch.reshape((1,) + batch.shape)  # (1, 1, ...)
         q_values = self.policy_model.predict_on_batch(batch).flatten()
