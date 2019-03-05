@@ -168,7 +168,7 @@ class DDPGAgent(Agent):
 
         actor_optimizer.get_gradients = get_gradients
         updates = actor_optimizer.get_updates(
-            params=self.actor.trainable_weights, self.actor.constraints, loss=-K.mean(combined_output)) #None)
+            params=self.actor.trainable_weights,  loss=-K.mean(combined_output)) #self.actor.constraints, None)
         if self.target_model_update < 1.:
             # Include soft target model updates.
             updates += get_soft_target_model_updates(self.target_actor, self.actor, self.target_model_update)
