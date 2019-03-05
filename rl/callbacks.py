@@ -135,7 +135,7 @@ class TrainEpisodeLogger(Callback):
         self.train_start = timeit.default_timer()
         self.metrics_names = self.model.metrics_names
         print('Training for {} steps ...'.format(self.params['nb_steps']))
-        
+
     def on_train_end(self, logs):
         """ Print training time at end of training """
         duration = timeit.default_timer() - self.train_start
@@ -169,7 +169,7 @@ class TrainEpisodeLogger(Callback):
                 except Warning:
                     value = '--'
                     metrics_template += '{}: {}'
-                metrics_variables += [name, value]          
+                metrics_variables += [name, value]
         metrics_text = metrics_template.format(*metrics_variables)
 
         nb_step_digits = str(int(np.ceil(np.log10(self.params['nb_steps']))) + 1)
@@ -250,7 +250,7 @@ class TrainIntervalLogger(Callback):
                     assert means.shape == (len(self.metrics_names),)
                     for name, mean in zip(self.metrics_names, means):
                         formatted_metrics += ' - {}: {:.3f}'.format(name, mean)
-                
+
                 formatted_infos = ''
                 if len(self.infos) > 0:
                     infos = np.array(self.infos)
@@ -310,9 +310,9 @@ class FileLogger(Callback):
         self.starts[episode] = timeit.default_timer()
 
     def on_episode_end(self, episode, logs):
-        """ Compute and print metrics at the end of each episode """ 
+        """ Compute and print metrics at the end of each episode """
         duration = timeit.default_timer() - self.starts[episode]
-        
+
         metrics = self.metrics[episode]
         if np.isnan(metrics).all():
             mean_metrics = np.array([np.nan for _ in self.metrics_names])
@@ -375,6 +375,7 @@ class ModelIntervalCheckpoint(Callback):
         self.total_steps = 0
 
     def on_step_end(self, step, logs={}):
+        """ Save weights at interval steps during training """
         self.total_steps += 1
         if self.total_steps % self.interval != 0:
             # Nothing to do.
