@@ -356,7 +356,7 @@ class EpisodicMemory(Memory):
             timestep = EpisodicTimestep(observation=observation, action=action, reward=reward, terminal=terminal)
             if len(self.episodes) == 0:
                 self.episodes.append([])  # first episode
-            print(self.episodes)
+            print(self.episodes())
             self.episodes[-1].append(timestep)
             if self.terminal:
                 self.episodes.append([])
