@@ -16,7 +16,7 @@ from rl.memory import Memory, SequentialMemory, EpisodeParameterMemory, Episodic
 from rl.processors import MultiModeCartpole
 
 def test_dqn():
-    print 'Testing DQN on two round deterministic problem'
+    print( 'Testing DQN on two round deterministic problem')
     env = TwoRoundDeterministicRewardEnv()
     np.random.seed(123)
     env.seed(123)
@@ -40,7 +40,7 @@ def test_dqn():
     assert_allclose(np.mean(h.history['episode_reward']), 3.)
 
     
-    print 'Testing DQN on cartpole problem'
+    print( 'Testing DQN on cartpole problem')
     env = gym.make('CartPole-v0')
     np.random.seed(123)
     env.seed(123)
@@ -239,7 +239,7 @@ def test_recurrent_dqn():
 #     print np.mean(h.history['episode_reward'])
 #     assert np.mean(h.history['episode_reward']) > 195.
     
-    print 'Testing DQN on cartpole problem with hidden LSTM and unrolling episodes'
+    print( 'Testing DQN on cartpole problem with hidden LSTM and unrolling episodes')
     env = gym.make('CartPole-v0')
     np.random.seed(123)
     env.seed(123)
@@ -272,11 +272,11 @@ def test_recurrent_dqn():
     dqn.fit(env, nb_steps=40000, visualize=True, verbose=2)
     policy.eps = 0.
     h = dqn.test(env, nb_episodes=20, visualize=True)
-    print np.mean(h.history['episode_reward'])
+    print( np.mean(h.history['episode_reward']))
     assert np.mean(h.history['episode_reward']) > 195.
 
 
-    print 'Testing DQN on multi-mode cartpole problem'
+    print('Testing DQN on multi-mode cartpole problem')
     env = gym.make('CartPole-v0')
     np.random.seed(123)
     env.seed(123)
@@ -313,7 +313,7 @@ def test_recurrent_dqn():
     dqn.fit(env, nb_steps=30000, visualize=True, verbose=2)
     policy.eps = 0.
     h = dqn.test(env, nb_episodes=20, visualize=True)
-    print np.mean(h.history['episode_reward'])
+    print(np.mean(h.history['episode_reward']))
     assert np.mean(h.history['episode_reward']) > 195.
     
 

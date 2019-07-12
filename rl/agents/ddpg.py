@@ -245,7 +245,7 @@ class DDPGAgent(Agent):
             self.memory.append(self.recent_observation, self.recent_action, reward, terminal,
                                training=self.training)
         if debug:
-            print "write memory time: " + str(time.time() - start_time) + " s"
+            print("write memory time: " + str(time.time() - start_time) + " s")
 
         metrics = [np.nan for _ in self.metrics_names]
         if not self.training:
@@ -260,7 +260,7 @@ class DDPGAgent(Agent):
             #experiences,
             state0_batch, action_batch, reward_batch, state1_batch, terminal1_batch = self.memory.sample(self.batch_size)
             if debug:
-                print "read memory time: " + str(time.time() - start_time) + " s"
+                print("read memory time: " + str(time.time() - start_time) + " s")
 
             #assert len(experiences) == self.batch_size
 
@@ -305,7 +305,7 @@ class DDPGAgent(Agent):
                 start_time = time.time()
                 metrics = self.critic.train_on_batch(state0_batch_with_action, targets)
                 if debug:
-                    print "train value function time: " + str(time.time() - start_time) + " s"
+                    print("train value function time: " + str(time.time() - start_time) + " s")
 
                 if self.processor is not None:
                     metrics += self.processor.metrics
@@ -323,7 +323,7 @@ class DDPGAgent(Agent):
                 start_time = time.time()
                 action_values = self.actor_train_fn(inputs)[0]
                 if debug:
-                    print "train action time: " + str(time.time() - start_time) + " s"
+                    print("train action time: " + str(time.time() - start_time) + " s")
 
                 assert action_values.shape == (self.batch_size, self.nb_actions)
 

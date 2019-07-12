@@ -59,12 +59,13 @@ class AbstractDQNAgent(Agent):
 
     def process_state_batch(self, batch):
         if self.processor is None:
+            batch_temp = np.array(batch)
             if self.is_recurrent:
-                while batch.ndim < 3:
+                while batch_temp.ndim < 3:
                     # discreet inputs must be converted to arrays for recurrent inputs
-                    batch = batch.reshape(batch.shape + (1,))
+                    batch_temp = batch_temp.reshape(batch_temp.shape + (1,))
             #batch = batch.reshape((1,) + batch.shape)
-            return batch
+            return batch_temp
         return self.processor.process_state_batch(batch)
 
     def compute_q_values(self, state):
@@ -122,7 +123,7 @@ class DQNAgent(AbstractDQNAgent):
         self.enable_dueling_network = enable_dueling_network
         self.dueling_type = dueling_type
         self.nb_max_steps_recurrent_unrolling = nb_max_steps_recurrent_unrolling
-        
+
         if self.enable_dueling_network:
             # get the second last layer of the model, abandon the last layer
             layer = model.layers[-2]
@@ -169,9 +170,9 @@ class DQNAgent(AbstractDQNAgent):
             callbacks = kwargs.get('callbacks',[])
             callbacks += [ResetStatesCallback()]
             kwargs['callbacks'] = callbacks
-        
+
         super(DQNAgent, self).fit(*args, **kwargs)
-        
+
     def get_config(self):
         config = super(DQNAgent, self).get_config()
         config['enable_double_dqn'] = self.enable_double_dqn
@@ -214,7 +215,7 @@ class DQNAgent(AbstractDQNAgent):
         # ever want to update the Q values for a certain action. The way we achieve this is by
         # using a custom Lambda layer that computes the loss. This gives us the necessary flexibility
         # to mask out certain parameters by passing in multiple inputs to the Lambda layer.
-        input_shape = (None, self.nb_actions) if self.is_recurrent else (self.nb_actions,) 
+        input_shape = (None, self.nb_actions) if self.is_recurrent else (self.nb_actions,)
         output_shape = (None, 1) if self.is_recurrent else (1,)
 
         y_pred = self.model.output
@@ -222,7 +223,7 @@ class DQNAgent(AbstractDQNAgent):
         mask = Input(name='mask', shape=input_shape)
         loss_out = Lambda(clipped_masked_error, output_shape=output_shape, name='loss')([y_pred, y_true, mask])
         ins = [self.model.input] if type(self.model.input) is not list else self.model.input
-        
+
         self.trainable_model = Model(inputs=ins + [y_true, mask], outputs=[loss_out, y_pred])
         assert len(self.trainable_model.output_names) == 2
         combined_metrics = {self.trainable_model.output_names[1]: metrics}
@@ -270,7 +271,6 @@ class DQNAgent(AbstractDQNAgent):
         # Book-keeping.
         self.recent_observation = observation
         self.recent_action = action
-        #print 'forward pass: ', str(time.time() - start_time)
 
         return action
 
@@ -286,21 +286,21 @@ class DQNAgent(AbstractDQNAgent):
             # We're done here. No need to update the experience memory since we only use the working
             # memory to obtain the state over the most recent observations.
             return metrics
-        
+
         # Train the network on a single stochastic batch.
         if self.step > self.nb_steps_warmup and self.step % self.train_interval == 0:
             experiences, state0_batch, action_batch, reward_batch, state1_batch, terminal1_batch = self.memory.sample(self.batch_size)
             assert len(experiences) == self.batch_size
-            
+
             # Prepare and validate parameters.
             state0_batch = self.process_state_batch(state0_batch)
             state1_batch = self.process_state_batch(state1_batch)
             terminal1_batch = np.invert(terminal1_batch)  # invert terminal for later
-            
+
             assert len(action_batch) == self.batch_size
             assert len(reward_batch) == self.batch_size
             assert len(terminal1_batch) == self.batch_size
-            
+
             # reset stateful models
             if self.model.stateful:
                 self.model.reset_states()
@@ -331,27 +331,27 @@ class DQNAgent(AbstractDQNAgent):
                 assert target_q_values.shape[-1] == self.nb_actions
                 q_batch = np.max(target_q_values, axis=-1)
             assert len(q_batch) == self.batch_size
-            
+
             targets = np.zeros(q_batch.shape + (self.nb_actions,))
             masks = np.zeros(q_batch.shape + (self.nb_actions,))
             if self.is_recurrent:
                 dummy_targets = np.zeros(q_batch.shape + (1,))
             else:
                 dummy_targets = np.zeros(q_batch.shape)
-            
+
             # Compute r_t + gamma * max_a Q(s_t+1, a) and update the target targets accordingly,
             # but only for the affected output units (as given by action_batch).
             discounted_reward_batch = self.gamma * q_batch
-            
+
             # Set discounted reward to zero for all states that were terminal.
             if self.is_recurrent:
                 discounted_reward_batch *= terminal1_batch.reshape(discounted_reward_batch.shape)
             else:
                 discounted_reward_batch *= terminal1_batch
             assert discounted_reward_batch.shape == reward_batch.shape
-            
+
             Rs = reward_batch + discounted_reward_batch
-            
+
             if self.is_recurrent:
                 for idx, (target_i, mask_i, R_i, action_i, terminal_i) in enumerate(zip(targets, masks, Rs, action_batch, terminal1_batch)):
                     for target, mask, R, action, terminal in zip(target_i, mask_i, R_i, action_i, terminal_i):
@@ -367,7 +367,7 @@ class DQNAgent(AbstractDQNAgent):
                     mask[action] = 1.  # enable loss for this specific action
                     if not terminal:
                         break   # stop after terminal step
-            
+
             # In the recurrent case, we support splitting the sequences into multiple
             # chunks. Each chunk is then used as a training example. The reason for this is that,
             # for too long episodes, the unrolling in time during backpropagation can exceed the
@@ -387,8 +387,7 @@ class DQNAgent(AbstractDQNAgent):
             else:
                 chunks = [([state0_batch], targets, masks, dummy_targets)]
 
-            #print 'backward pass prep: ', str(time.time() - start_time)
-            
+
             #start_time = time.time()
             metrics = []
             for i, t, m, dt in chunks:
@@ -402,12 +401,11 @@ class DQNAgent(AbstractDQNAgent):
             metrics += self.policy.metrics
             if self.processor is not None:
                 metrics += self.processor.metrics
-                
-            #print 'Training pass: ', str(time.time() - start_time)
+
 
         if self.target_model_update >= 1 and self.step % self.target_model_update == 0:
             self.update_target_model_hard()
-            
+
         return metrics
 
     @property
@@ -506,11 +504,11 @@ class NAFLayer(Layer):
                 nb_rows = tf.shape(L_flat)[0]
                 zeros = tf.expand_dims(tf.tile(K.zeros((1,)), [nb_rows]), 1)
                 try:
-                    # Old TF behavior.
-                    L_flat = tf.concat(1, [zeros, L_flat])
-                except TypeError:
                     # New TF behavior
                     L_flat = tf.concat([zeros, L_flat], 1)
+                except TypeError:
+                    # Old TF behavior.
+                    L_flat = tf.concat(1, [zeros, L_flat])
 
                 # Create mask that can be used to gather elements from L_flat and put them
                 # into a lower triangular matrix.
@@ -575,11 +573,11 @@ class NAFLayer(Layer):
                 nb_rows = tf.shape(L_flat)[0]
                 zeros = tf.expand_dims(tf.tile(K.zeros((1,)), [nb_rows]), 1)
                 try:
-                    # Old TF behavior.
-                    L_flat = tf.concat(1, [zeros, L_flat])
-                except TypeError:
                     # New TF behavior
                     L_flat = tf.concat([zeros, L_flat], 1)
+                except TypeError:
+                    # Old TF behavior.
+                    L_flat = tf.concat(1, [zeros, L_flat])
 
                 # Finally, process each element of the batch.
                 def fn(a, x):
@@ -639,7 +637,7 @@ class NAFAgent(AbstractDQNAgent):
         super(NAFAgent, self).__init__(*args, **kwargs)
 
         # TODO: Validate (important) input.
-
+        self.is_recurrent = is_recurrent(V_model)|is_recurrent(V_model)|is_recurrent(mu_model)
         # Parameters.
         self.random_process = random_process
         self.covariance_mode = covariance_mode
@@ -708,7 +706,8 @@ class NAFAgent(AbstractDQNAgent):
 
     def select_action(self, state):
         batch = self.process_state_batch([state])
-        action = self.mu_model.predict_on_batch(batch).flatten()
+        action = self.mu_model.predict_on_batch(batch)#.flatten()
+        action = action[-1,:]
         assert action.shape == (self.nb_actions,)
 
         # Apply noise, if a random process is set.
@@ -746,7 +745,9 @@ class NAFAgent(AbstractDQNAgent):
 
         # Train the network on a single stochastic batch.
         if self.step > self.nb_steps_warmup and self.step % self.train_interval == 0:
-            experiences = self.memory.sample(self.batch_size)
+            experiences = self.memory.sample(self.batch_size) #EpisodeParameterMemory
+            #state0_batch,state1_batch, action_batch, reward_batch, terminal1_batch = self.memory.sample(self.batch_size) #EpisodicMemory
+            #print(len(experiences))
             assert len(experiences) == self.batch_size
 
             # Start by extracting the necessary parameters (we use a vectorized implementation).
@@ -755,6 +756,7 @@ class NAFAgent(AbstractDQNAgent):
             action_batch = []
             terminal1_batch = []
             state1_batch = []
+
             for e in experiences:
                 state0_batch.append(e.state0)
                 state1_batch.append(e.state1)
@@ -764,10 +766,13 @@ class NAFAgent(AbstractDQNAgent):
 
             # Prepare and validate parameters.
             state0_batch = self.process_state_batch(state0_batch)
+            #print(state0_batch)
             state1_batch = self.process_state_batch(state1_batch)
             terminal1_batch = np.array(terminal1_batch)
+
             reward_batch = np.array(reward_batch)
             action_batch = np.array(action_batch)
+            #print("line 775",len(reward_batch))
             assert reward_batch.shape == (self.batch_size,)
             assert terminal1_batch.shape == reward_batch.shape
             assert action_batch.shape == (self.batch_size, self.nb_actions)

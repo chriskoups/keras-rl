@@ -68,7 +68,7 @@ def is_recurrent(model):
 
 def huber_loss(y_true, y_pred, delta_clip=1):
     """ huber_loss
-    
+
     y_true: The ground truth output tensor, same dimensions as 'y_pred'.
     y_pred: The predicted outputs.
     clip_value: float, the point where the huber loss function changes from a quadratic to linear.
